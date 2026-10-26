@@ -14,11 +14,12 @@ import {
   Play, Quote, Calendar, Clock, Mail, ShieldCheck, HeartHandshake, Loader2, FileBarChart,
 } from 'lucide-react';
 import CampaignCard from '@/components/site/campaign-card';
+import InitialsAvatar from '@/components/site/initials-avatar';
 import CountUp from '@/components/site/count-up';
 import PrayerWall from '@/components/site/prayer-wall';
 import InstagramFeed from '@/components/site/instagram-feed';
 import { useApi } from '@/components/site/use-api';
-import { HERO_SLIDES, QUICK_SERVICES, IMPACT_STATS, ORG, SOCIALS } from '@/lib/site-data';
+import { QUICK_SERVICES, IMPACT_STATS, ORG, SOCIALS } from '@/lib/site-data';
 
 const ICONS = { Calculator, BookOpen, MessageCircleQuestion, ReceiptText };
 
@@ -45,9 +46,8 @@ export default function App() {
   const { data: stats } = useApi('/api/stats');
   const { data: homeCfg } = useApi('/api/home-settings');
 
-  const cfgSlides = (homeCfg?.slides && homeCfg.slides.length)
-    ? homeCfg.slides
-    : HERO_SLIDES.map((s) => ({ ...s, link: `/donasi/${s.slug}` }));
+  // The hero is driven entirely by the CMS: the API only returns Active, already-published slides.
+  const cfgSlides = Array.isArray(homeCfg?.slides) ? homeCfg.slides : [];
   const slideDuration = Number(homeCfg?.duration_ms) > 0 ? Number(homeCfg.duration_ms) : 6000;
   const slideCount = cfgSlides.length;
 
@@ -69,26 +69,30 @@ export default function App() {
     finally { setSubLoading(false); }
   };
 
-  const slide = cfgSlides[current % slideCount] || cfgSlides[0];
+  const slide = slideCount ? cfgSlides[current % slideCount] : null;
+  // Neutral brand banner while loading or when no slide is active (not CMS content).
+  const view = slide || { badge: ORG.short, title: ORG.name, subtitle: ORG.tagline, image: '', link: '/donasi' };
 
   return (
     <div>
       {/* HERO SLIDER */}
       <section className="relative h-[560px] md:h-[640px] overflow-hidden bg-brand-ink">
-        <AnimatePresence mode="wait">
-          <motion.div key={current} initial={{ opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.9 }} className="absolute inset-0">
-            <img src={slide.image} alt={slide.title} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 hero-gradient" />
-          </motion.div>
-        </AnimatePresence>
+        {view.image ? (
+          <AnimatePresence mode="wait">
+            <motion.div key={current} initial={{ opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.9 }} className="absolute inset-0">
+              <img src={view.image} alt={view.title} className="w-full h-full object-cover" />
+              <div className="absolute inset-0 hero-gradient" />
+            </motion.div>
+          </AnimatePresence>
+        ) : <div className="absolute inset-0 hero-gradient" />}
 
         <div className="container relative h-full flex items-center">
           <div className="max-w-xl text-white animate-fade-up">
-            <Badge className="bg-brand-green hover:bg-brand-green text-white border-0 mb-4">{slide.badge}</Badge>
-            <h1 className="text-3xl md:text-5xl font-extrabold leading-tight drop-shadow-sm">{slide.title}</h1>
-            <p className="mt-4 text-white/90 text-base md:text-lg max-w-lg">{slide.subtitle}</p>
+            <Badge className="bg-brand-green hover:bg-brand-green text-white border-0 mb-4">{view.badge}</Badge>
+            <h1 className="text-3xl md:text-5xl font-extrabold leading-tight drop-shadow-sm">{view.title}</h1>
+            <p className="mt-4 text-white/90 text-base md:text-lg max-w-lg">{view.subtitle}</p>
             <div className="flex flex-wrap gap-3 mt-7">
-              <Link href={slide.link || (slide.slug ? `/donasi/${slide.slug}` : '/donasi')}><Button size="lg" className="rounded-xl h-12 px-7 text-base"><Heart className="w-5 h-5 mr-2" />Donasi Sekarang</Button></Link>
+              <Link href={view.link || (view.slug ? `/donasi/${view.slug}` : '/donasi')}><Button size="lg" className="rounded-xl h-12 px-7 text-base"><Heart className="w-5 h-5 mr-2" />Donasi Sekarang</Button></Link>
               <Link href="/program"><Button size="lg" variant="outline" className="rounded-xl h-12 px-7 text-base bg-white/10 text-white border-white/50 hover:bg-white hover:text-brand-ink">Lihat Program</Button></Link>
             </div>
           </div>
@@ -128,7 +132,7 @@ export default function App() {
           <Link href="/donasi" className="hidden md:block"><Button variant="outline" className="rounded-xl">Semua Program<ArrowRight className="w-4 h-4 ml-2" /></Button></Link>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {(featured || []).slice(0, 4).map((c) => <CampaignCard key={c.id} c={c} />)}
+          {Array.isArray(featured) ? featured.slice(0, 4).map((c) => <CampaignCard key={c.id} c={c} />) : null}
           {!featured && Array.from({ length: 4 }).map((_, i) => <div key={i} className="rounded-2xl bg-muted animate-pulse h-96" />)}
         </div>
       </section>
@@ -173,40 +177,40 @@ export default function App() {
       <section className="container py-16 md:py-20">
         <SectionHeading eyebrow="Kabar Kebaikan" title="Berita &amp; Artikel Terbaru" center />
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
-          {(news || []).slice(0, 4).map((n) => (
-            <Link key={n.id} href={`/kegiatan`}>
+          {Array.isArray(news) ? news.slice(0, 4).map((n) => (
+            <Link key={n.id} href={`/news/${n.slug}`}>
               <Card className="overflow-hidden rounded-2xl border-border shadow-sm hover:shadow-card transition-all duration-300 group h-full">
-                <div className="aspect-[16/10] overflow-hidden">
-                  <img src={n.image} alt={n.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                <div className="aspect-[16/10] overflow-hidden bg-brand-slatebg">
+                  {n.image ? <img src={n.image} alt={n.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /> : null}
                 </div>
                 <div className="p-4">
                   <Badge variant="secondary" className="mb-2 text-brand-blue bg-brand-bluelight border-0">{n.category}</Badge>
                   <h3 className="font-heading font-bold text-sm leading-snug line-clamp-2 group-hover:text-brand-green transition-colors">{n.title}</h3>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground mt-3">
-                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(n.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(n.publishedAt || n.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                     <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{n.read_time} mnt baca</span>
                   </div>
                 </div>
               </Card>
             </Link>
-          ))}
+          )) : null}
         </div>
       </section>
 
-      {/* TESTIMONI */}
-      <section className="bg-brand-slatebg">
+      {/* TESTIMONI (managed in admin; hidden when none are shown) */}
+      {!(Array.isArray(testimonials) && testimonials.length === 0) && <section className="bg-brand-slatebg">
         <div className="container py-16 md:py-20">
           <SectionHeading eyebrow="Kata Mereka" title="Cerita &amp; Kepercayaan" center desc="Suara para donatur, tokoh masyarakat, dan penerima manfaat." />
           <div className="mt-10 px-4 md:px-10">
             <Carousel opts={{ align: 'start', loop: true }}>
               <CarouselContent>
-                {(testimonials || []).map((t) => (
+                {Array.isArray(testimonials) ? testimonials.map((t) => (
                   <CarouselItem key={t.id} className="md:basis-1/2 lg:basis-1/3">
                     <Card className="rounded-2xl p-6 h-full border-border bg-white shadow-sm">
                       <Quote className="w-8 h-8 text-brand-green/30" />
                       <p className="text-brand-ink mt-3 leading-relaxed">&ldquo;{t.quote}&rdquo;</p>
                       <div className="flex items-center gap-3 mt-5">
-                        <img src={t.avatar} alt={t.name} className="w-11 h-11 rounded-full" />
+                        <InitialsAvatar src={t.avatar} name={t.name} className="w-11 h-11 rounded-full" />
                         <div>
                           <p className="font-semibold text-sm text-brand-ink">{t.name}</p>
                           <p className="text-xs text-muted-foreground">{t.role}</p>
@@ -214,14 +218,14 @@ export default function App() {
                       </div>
                     </Card>
                   </CarouselItem>
-                ))}
+                )) : null}
               </CarouselContent>
               <CarouselPrevious className="hidden md:flex" />
               <CarouselNext className="hidden md:flex" />
             </Carousel>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* GALERI */}
       <section className="container py-16 md:py-20">
@@ -237,11 +241,11 @@ export default function App() {
             <span className="absolute bottom-4 left-4 text-white font-semibold text-sm bg-black/50 px-3 py-1 rounded-full">Kunjungi Kanal YouTube Kami</span>
           </a>
           <div className="grid grid-cols-3 gap-3">
-            {(gallery || []).slice(0, 6).map((g) => (
+            {Array.isArray(gallery) ? gallery.slice(0, 6).map((g) => (
               <div key={g.id} className="aspect-square rounded-xl overflow-hidden group relative">
                 <img src={g.image} alt={g.caption} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
               </div>
-            ))}
+            )) : null}
           </div>
         </div>
       </section>
