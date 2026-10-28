@@ -424,3 +424,26 @@ test('Entries are seeded once: deleting all testimonials keeps them deleted', as
   await cms.ensureEntrySeeds(new FakeDb(), { testimonial: () => [{ id: 'again', name: 'x', quote: 'y' }] })
   assert.equal((await call('GET', 'testimonials')).body.length, 0)
 })
+
+test('Identitas & Kontak: defaults without DB, admin edit shows publicly, bad input refused', async () => {
+  noDb()
+  const def = (await call('GET', 'site-settings')).body
+  assert.equal(def.whatsapp, '6285828112032')
+  assert.equal((await call('GET', 'admin/site-settings', { admin: true })).body.db, false)
+  assert.equal((await call('POST', 'admin/site-settings', { body: def })).status, 401)
+
+  useDb()
+  const next = { ...def, address: 'Jl. Kinibalu No.44, Banjarmasin', phone: '0811-000-111', email: 'halo@yababerma.org', youtube: '' }
+  assert.equal((await call('POST', 'admin/site-settings', { admin: true, body: next })).status, 200)
+  const pub = (await call('GET', 'site-settings')).body
+  assert.equal(pub.address, next.address)
+  assert.equal(pub.email, next.email)
+  assert.equal(pub.youtube, '', 'cleared social link stays cleared')
+
+  const badWa = await call('POST', 'admin/site-settings', { admin: true, body: { ...next, whatsapp: '12' } })
+  assert.equal(badWa.status, 400)
+  const badLink = await call('POST', 'admin/site-settings', { admin: true, body: { ...next, facebook: 'javascript:alert(1)' } })
+  assert.equal(badLink.status, 400)
+  assert.deepEqual(badLink.body.fields, ['facebook'])
+  assert.equal((await call('GET', 'site-settings')).body.facebook, def.facebook, 'rejected save changes nothing')
+})

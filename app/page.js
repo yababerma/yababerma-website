@@ -19,7 +19,8 @@ import CountUp from '@/components/site/count-up';
 import PrayerWall from '@/components/site/prayer-wall';
 import InstagramFeed from '@/components/site/instagram-feed';
 import { useApi } from '@/components/site/use-api';
-import { QUICK_SERVICES, IMPACT_STATS, ORG, SOCIALS } from '@/lib/site-data';
+import { QUICK_SERVICES, IMPACT_STATS, ORG } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 
 const ICONS = { Calculator, BookOpen, MessageCircleQuestion, ReceiptText };
 
@@ -34,6 +35,7 @@ function SectionHeading({ eyebrow, title, desc, center }) {
 }
 
 export default function App() {
+  const site = useSiteSettings();
   const [current, setCurrent] = useState(0);
   const [email, setEmail] = useState('');
   const [subLoading, setSubLoading] = useState(false);
@@ -231,7 +233,7 @@ export default function App() {
       <section className="container py-16 md:py-20">
         <SectionHeading eyebrow="Galeri Kami" title="Dokumentasi Kegiatan" center />
         <div className="grid lg:grid-cols-2 gap-6 mt-10 items-start">
-          <a href={SOCIALS.youtube} target="_blank" rel="noopener noreferrer" className="rounded-2xl overflow-hidden shadow-card relative aspect-video bg-brand-ink group block">
+          <a href={site.youtube} target="_blank" rel="noopener noreferrer" className="rounded-2xl overflow-hidden shadow-card relative aspect-video bg-brand-ink group block">
             <img src="https://images.unsplash.com/photo-1589995635011-078e0bb91d11" alt="Video Yayasan" className="w-full h-full object-cover opacity-80 group-hover:opacity-90 transition" />
             <div className="absolute inset-0 flex items-center justify-center">
               <span className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center group-hover:scale-110 transition-transform">

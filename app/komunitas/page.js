@@ -7,9 +7,11 @@ import { Instagram, UsersRound, HeartHandshake, ArrowRight } from 'lucide-react'
 import { useApi } from '@/components/site/use-api';
 import Stars from '@/components/site/stars';
 import InitialsAvatar from '@/components/site/initials-avatar';
-import { WHATSAPP_ADMIN } from '@/lib/site-data';
+import { waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 
 export default function KomunitasPage() {
+  const site = useSiteSettings();
   const { data, loading, error } = useApi('/api/communities');
   const list = Array.isArray(data) ? data : [];
 
@@ -69,7 +71,7 @@ export default function KomunitasPage() {
         <div className="rounded-3xl bg-brand-green text-white p-8 md:p-12 text-center">
           <h2 className="text-2xl md:text-3xl font-extrabold">Punya komunitas relawan?</h2>
           <p className="text-white/80 mt-2">Mari berkolaborasi dalam program kebaikan bersama Yayasan Banua Berkah Mandiri.</p>
-          <a href={`https://wa.me/${WHATSAPP_ADMIN}?text=${encodeURIComponent('Assalamualaikum, komunitas kami ingin berkolaborasi dengan YABABERMA.')}`} target="_blank" rel="noopener noreferrer">
+          <a href={waLink(site.whatsapp, 'Assalamualaikum, komunitas kami ingin berkolaborasi dengan YABABERMA.')} target="_blank" rel="noopener noreferrer">
             <Button size="lg" variant="secondary" className="rounded-xl mt-6 bg-white text-brand-green hover:bg-white/90">Hubungi Kami</Button>
           </a>
         </div>

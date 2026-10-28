@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { Button } from '@/components/ui/button';
 import { HelpCircle, MessageCircle, Calculator, BookOpen, Sparkles, HandHeart } from 'lucide-react';
-import { waLink, WHATSAPP_ADMIN } from '@/lib/site-data';
+import { waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 
 const GROUPS = [
   {
@@ -43,7 +44,8 @@ const GROUPS = [
 ];
 
 export default function FaqPage() {
-  const waHelp = waLink(WHATSAPP_ADMIN, 'Halo Admin YABABERMA, saya ingin bertanya seputar donasi.');
+  const site = useSiteSettings();
+  const waHelp = waLink(site.whatsapp, 'Halo Admin YABABERMA, saya ingin bertanya seputar donasi.');
   return (
     <div>
       <section className="bg-brand-slatebg border-b border-border">

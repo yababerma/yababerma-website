@@ -10,10 +10,12 @@ import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { formatRupiah, ORG } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 import { isKurbanDonation, downloadKurbanCertificate, isWakafDonation, downloadWakafCertificate, isZakatDonation, downloadZakatReceipt } from '@/lib/receipts';
 import { Wallet, HeartHandshake, Download, LogIn, Bell, HandCoins, Loader2, Award, BookOpen, FileText } from 'lucide-react';
 
 export default function DashboardPage() {
+  const site = useSiteSettings();
   const { user, loading, login, logout, refresh } = useAuth();
   const [donations, setDonations] = useState(null);
   const [savingNews, setSavingNews] = useState(false);
@@ -61,7 +63,7 @@ export default function DashboardPage() {
         .verified{background:#e6f7ee;color:#00A651}.pending{background:#fef3c7;color:#b45309}
         .foot{margin-top:32px;text-align:center;font-size:12px;color:#94a3b8}
       </style></head><body>
-      <div class="head"><img src="${ORG.logo}"/><div><h1>${ORG.name}</h1><div class="sub">${ORG.address}<br/>Akta Kemenkumham: ${ORG.ahu}</div></div></div>
+      <div class="head"><img src="${ORG.logo}"/><div><h1>${ORG.name}</h1><div class="sub">${site.address}<br/>Akta Kemenkumham: ${site.ahu}</div></div></div>
       <div class="title">KUITANSI DONASI</div>
       <div style="text-align:center" class="sub">No. ${d.id}</div>
       <table>

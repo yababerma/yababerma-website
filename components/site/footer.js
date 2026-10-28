@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Instagram, Facebook, Youtube, MapPin, Mail, Phone, ShieldCheck, FileBarChart } from 'lucide-react';
-import { ORG, NAV_ITEMS, SOCIALS, WHATSAPP_ADMIN, WA_INQUIRY_MESSAGE, waLink } from '@/lib/site-data';
+import { ORG, NAV_ITEMS, waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 
 function TikTokIcon() {
   return (
@@ -22,6 +23,7 @@ function WhatsAppIcon() {
 }
 
 function SocialLink({ href, label, className = 'bg-white/10 hover:bg-brand-green', children }) {
+  if (!href) return null;
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label} className={`w-9 h-9 rounded-lg flex items-center justify-center transition text-white ${className}`}>
       {children}
@@ -31,6 +33,7 @@ function SocialLink({ href, label, className = 'bg-white/10 hover:bg-brand-green
 
 export default function Footer() {
   const pathname = usePathname();
+  const s = useSiteSettings();
   // Hide footer on the admin panel (WordPress-like clean admin area)
   if (pathname && pathname.startsWith('/admin')) return null;
   return (
@@ -44,14 +47,14 @@ export default function Footer() {
               <p className="font-heading font-bold text-white leading-tight">Berkah Mandiri</p>
             </div>
           </div>
-          <p className="text-sm mt-4 text-slate-400">{ORG.tagline}. Lembaga filantropi Islam &amp; kemanusiaan yang amanah di Banjarmasin.</p>
+          <p className="text-sm mt-4 text-slate-400">{s.about}</p>
           <div className="flex gap-2 mt-5 flex-wrap">
-            <SocialLink href={waLink(WHATSAPP_ADMIN, WA_INQUIRY_MESSAGE)} label="WhatsApp Admin" className="bg-[#25D366] hover:bg-[#1eb457]"><WhatsAppIcon /></SocialLink>
-            <SocialLink href={SOCIALS.instagram} label="Instagram YABABERMA"><Instagram className="w-4 h-4" /></SocialLink>
-            <SocialLink href={SOCIALS.instagram_panti} label="Instagram Panti Asuhan"><Instagram className="w-4 h-4" /></SocialLink>
-            <SocialLink href={SOCIALS.tiktok} label="TikTok"><TikTokIcon /></SocialLink>
-            <SocialLink href={SOCIALS.youtube} label="YouTube"><Youtube className="w-4 h-4" /></SocialLink>
-            <SocialLink href={SOCIALS.facebook} label="Facebook"><Facebook className="w-4 h-4" /></SocialLink>
+            <SocialLink href={waLink(s.whatsapp, s.wa_message)} label="WhatsApp Admin" className="bg-[#25D366] hover:bg-[#1eb457]"><WhatsAppIcon /></SocialLink>
+            <SocialLink href={s.instagram} label="Instagram YABABERMA"><Instagram className="w-4 h-4" /></SocialLink>
+            <SocialLink href={s.instagram_panti} label="Instagram Panti Asuhan"><Instagram className="w-4 h-4" /></SocialLink>
+            <SocialLink href={s.tiktok} label="TikTok"><TikTokIcon /></SocialLink>
+            <SocialLink href={s.youtube} label="YouTube"><Youtube className="w-4 h-4" /></SocialLink>
+            <SocialLink href={s.facebook} label="Facebook"><Facebook className="w-4 h-4" /></SocialLink>
           </div>
         </div>
 
@@ -77,13 +80,13 @@ export default function Footer() {
         <div>
           <h4 className="text-white font-semibold mb-4">Kantor &amp; Kontak</h4>
           <ul className="space-y-3 text-sm text-slate-400">
-            <li className="flex gap-2"><MapPin className="w-4 h-4 text-brand-green shrink-0 mt-0.5" />{ORG.address}</li>
-            <li className="flex gap-2"><Phone className="w-4 h-4 text-brand-green shrink-0" />{ORG.phone}</li>
-            <li className="flex gap-2"><Mail className="w-4 h-4 text-brand-green shrink-0" />{ORG.email}</li>
+            {s.address && <li className="flex gap-2"><MapPin className="w-4 h-4 text-brand-green shrink-0 mt-0.5" />{s.address}</li>}
+            {s.phone && <li className="flex gap-2"><Phone className="w-4 h-4 text-brand-green shrink-0" />{s.phone}</li>}
+            {s.email && <li className="flex gap-2"><Mail className="w-4 h-4 text-brand-green shrink-0" />{s.email}</li>}
           </ul>
           <div className="flex items-start gap-2 text-xs mt-4 text-slate-500">
             <ShieldCheck className="w-4 h-4 text-brand-blue shrink-0 mt-0.5" />
-            <span>Terdaftar &amp; Sah — Akta Kemenkumham<br /><span className="text-slate-300 font-medium">{ORG.ahu}</span></span>
+            <span>Terdaftar &amp; Sah — Akta Kemenkumham<br /><span className="text-slate-300 font-medium">{s.ahu}</span></span>
           </div>
         </div>
       </div>

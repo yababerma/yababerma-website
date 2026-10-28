@@ -90,3 +90,7 @@ credentials.json
 
 # Keep the env template tracked
 !.env.example
+
+# Local secrets & backups (never push: the repo is public)
+client_secret_*.json
+*.bundle

@@ -9,13 +9,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { Check, Copy, Loader2, ArrowLeft, Heart, ShieldCheck, MessageCircle, PartyPopper, Award, BookOpen, FileText, Gift, Share2 } from 'lucide-react';
-import { BANKS, WHATSAPP_ADMIN, formatRupiah, waLink, donationWaMessage } from '@/lib/site-data';
+import { BANKS, formatRupiah, waLink, donationWaMessage } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 import { isKurbanDonation, downloadKurbanCertificate, isWakafDonation, downloadWakafCertificate, isZakatDonation, downloadZakatReceipt } from '@/lib/receipts';
 import { downloadGreetingCard, shareGreetingWhatsApp, getGreetingDataUrl } from '@/lib/greeting-card';
 
 const QUICK = [10000, 50000, 100000, 250000, 500000, 1000000];
 
 export function DonationDialog({ open, setOpen, campaign, presetAmount, presetType, kurbanOption, kurbanQty }) {
+  const site = useSiteSettings();
   const [step, setStep] = useState(1);
   const [amount, setAmount] = useState(presetAmount || 0);
   const [custom, setCustom] = useState(presetAmount ? String(presetAmount) : '');
@@ -87,7 +89,7 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
   const copy = (text) => { navigator.clipboard.writeText(text); toast.success('Nomor rekening disalin'); };
 
   const waHref = result
-    ? waLink(WHATSAPP_ADMIN, donationWaMessage({ program: result.campaign_title, amount: result.total_amount, name: anon ? 'Hamba Allah' : form.donor_name }))
+    ? waLink(site.whatsapp, donationWaMessage({ program: result.campaign_title, amount: result.total_amount, name: anon ? 'Hamba Allah' : form.donor_name }))
     : '#';
 
   return (

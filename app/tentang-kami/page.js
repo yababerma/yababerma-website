@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import CountUp from '@/components/site/count-up';
-import { ORG, BERKAH_VALUES, IMPACT_STATS, LOCATIONS, WHATSAPP_ADMIN } from '@/lib/site-data';
+import { ORG, BERKAH_VALUES, IMPACT_STATS, LOCATIONS, waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 import PartnerMarquee from '@/components/site/partner-marquee';
 import { ShieldCheck, Eye, Compass, Flag, Building2, Users, Heart, CheckCircle2, Award, MapPin, Navigation, Phone } from 'lucide-react';
 
@@ -16,6 +17,7 @@ const MISI = [
 ];
 
 export default function TentangKamiPage() {
+  const site = useSiteSettings();
   return (
     <div>
       {/* HERO */}
@@ -50,7 +52,7 @@ export default function TentangKamiPage() {
           <div className="text-center md:text-left">
             <p className="text-white/80 text-sm">Legalitas &amp; Terdaftar Resmi</p>
             <h3 className="text-xl md:text-2xl font-extrabold font-heading">Pengesahan Kemenkumham RI</h3>
-            <p className="font-mono text-lg md:text-xl mt-1 font-bold tracking-wide">{ORG.ahu}</p>
+            <p className="font-mono text-lg md:text-xl mt-1 font-bold tracking-wide">{site.ahu}</p>
           </div>
         </Card>
       </section>
@@ -172,9 +174,9 @@ export default function TentangKamiPage() {
             ))}
           </div>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm">
-            <a href={`https://wa.me/${WHATSAPP_ADMIN}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-brand-ink hover:text-brand-green font-medium"><Phone className="w-4 h-4 text-brand-green" />{ORG.phone}</a>
+            <a href={waLink(site.whatsapp, site.wa_message)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-brand-ink hover:text-brand-green font-medium"><Phone className="w-4 h-4 text-brand-green" />{site.phone}</a>
             <span className="hidden sm:inline text-border">•</span>
-            <span className="text-muted-foreground">{ORG.email}</span>
+            <span className="text-muted-foreground">{site.email}</span>
           </div>
         </div>
       </section>

@@ -15,12 +15,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { formatRupiah } from '@/lib/site-data';
+import { formatRupiah, ORG } from '@/lib/site-data';
 import CampaignManager from '@/components/admin/campaign-manager';
 import SliderManager from '@/components/admin/slider-manager';
 import NewsManager from '@/components/admin/news-manager';
 import { TestimonialManager, CommunityManager, PartnerManager, AuthorManager } from '@/components/admin/content-managers';
-import { ShieldCheck, LogIn, CheckCircle2, RotateCcw, RefreshCw, Wallet, Clock, FileCheck2, Users, Loader2, LogOut, Download, Save, PawPrint, Search, Trash2, LayoutGrid, List as ListIcon, BarChart3, ImageDown, SlidersHorizontal, Eye, EyeOff, Mail, ArrowLeft, KeyRound, MessageSquare, Bell, Send, Newspaper, Quote, Handshake, UsersRound, PenLine } from 'lucide-react';
+import SiteSettingsManager from '@/components/admin/site-settings-manager';
+import { LogIn, CheckCircle2, RotateCcw, RefreshCw, Wallet, Clock, FileCheck2, Users, Loader2, LogOut, Download, Save, PawPrint, Search, Trash2, LayoutGrid, List as ListIcon, BarChart3, ImageDown, SlidersHorizontal, Eye, EyeOff, Mail, ArrowLeft, KeyRound, MessageSquare, Bell, Send, Newspaper, Quote, Handshake, UsersRound, PenLine, Building2 } from 'lucide-react';
 
 const CHART_COLORS = ['#00A651', '#0082C8', '#F59E0B', '#8B5CF6', '#EF4444', '#14B8A6', '#EC4899', '#64748B'];
 
@@ -295,7 +296,7 @@ export default function AdminPage() {
       <div className="container py-24">
         <Card className="max-w-md mx-auto rounded-2xl p-8 border-border shadow-sm">
           <div className="text-center">
-            <div className="w-16 h-16 rounded-2xl bg-brand-greenlight flex items-center justify-center mx-auto mb-4"><ShieldCheck className="w-8 h-8 text-brand-green" /></div>
+            <img src={ORG.logo} alt={ORG.name} className="w-16 h-16 object-contain mx-auto mb-4" />
             <h1 className="text-2xl font-extrabold text-brand-ink">Panel Admin YABABERMA</h1>
           </div>
 
@@ -378,6 +379,7 @@ export default function AdminPage() {
     },
     {
       label: 'Pengaturan', items: [
+        { value: 'site', label: 'Identitas & Kontak', icon: Building2 },
         { value: 'kurban', label: 'Kuota Kurban', icon: PawPrint },
         { value: 'wa', label: 'Pengaturan WA', icon: MessageSquare },
       ]
@@ -389,8 +391,8 @@ export default function AdminPage() {
       <div className="container py-8 md:py-12 space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-brand-green text-white flex items-center justify-center"><ShieldCheck className="w-6 h-6" /></div>
-            <div><h1 className="text-xl font-extrabold text-brand-ink">Panel Admin</h1><p className="text-sm text-muted-foreground">Verifikasi donasi &amp; konfirmasi transfer</p></div>
+            <img src={ORG.logo} alt={ORG.name} className="w-12 h-12 object-contain" />
+            <div><h1 className="text-xl font-extrabold text-brand-ink">Panel Admin</h1><p className="text-sm text-muted-foreground">{ORG.name}</p></div>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Button variant="outline" className="rounded-xl" onClick={exportCsv}><Download className="w-4 h-4 mr-2" />Ekspor CSV</Button>
@@ -817,6 +819,10 @@ export default function AdminPage() {
                   </div>
                 </div>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="site" className="mt-0">
+              <SiteSettingsManager adminKey={key} />
             </TabsContent>
 
             <TabsContent value="program" className="mt-0">

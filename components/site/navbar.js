@@ -16,6 +16,8 @@ export default function Navbar() {
   const { user, loading, login, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const isActive = (href) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
+  // The admin panel has its own header (logo + "Panel Admin"), not the public navigation
+  if (pathname && pathname.startsWith('/admin')) return null;
 
   return (
     <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-border">

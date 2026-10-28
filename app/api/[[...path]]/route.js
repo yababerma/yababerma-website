@@ -8,6 +8,7 @@ import {
   createEntry, updateEntry, reorderEntries, attachAuthors, getAuthorProfile, withProgramTitles,
   ensureEntrySeeds, runOnce, assignArticlesToAuthor,
 } from '../../../lib/cms.js'
+import { SITE_SETTINGS_DEFAULTS, normalizeWa } from '../../../lib/site-data.js'
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
@@ -104,7 +105,7 @@ async function sendDonationEmail(donation) {
           <tr><td style="padding:8px 0;color:#64748b">Bank Tujuan</td><td style="padding:8px 0;text-align:right;font-weight:600">${bank}</td></tr>
           <tr><td style="padding:8px 0;color:#64748b">No. Referensi</td><td style="padding:8px 0;text-align:right;font-weight:600">${escapeHtml(donation.id)}</td></tr>
         </table>
-        <div style="background:#e6f3fb;border-radius:12px;padding:14px;margin-top:16px;font-size:13px;color:#475569">Mohon selesaikan transfer tepat hingga 3 digit terakhir (kode unik) agar donasi mudah terverifikasi. Setelah transfer, konfirmasi via WhatsApp admin: <b>0878-1810-1175</b>.</div>
+        <div style="background:#e6f3fb;border-radius:12px;padding:14px;margin-top:16px;font-size:13px;color:#475569">Mohon selesaikan transfer tepat hingga 3 digit terakhir (kode unik) agar donasi mudah terverifikasi. Setelah transfer, konfirmasi via WhatsApp admin: <b>${escapeHtml(SITE_SETTINGS_DEFAULTS.phone)}</b>.</div>
         <p style="color:#94a3b8;font-size:12px;margin-top:20px;text-align:center">Semoga menjadi amal jariyah yang berkah. Aamiin.<br/>&copy; 2026 Yayasan Banua Berkah Mandiri</p>
       </div>
     </div>
@@ -537,6 +538,14 @@ async function getWaSettings(db) {
   }
 }
 
+// ---- Identitas & kontak (footer, WhatsApp narahubung) — edited from the admin panel ----
+const SOCIAL_KEYS = ['instagram', 'instagram_panti', 'tiktok', 'youtube', 'facebook']
+
+async function getSiteSettings(db) {
+  const doc = db ? await db.collection('settings').findOne({ id: 'site_settings' }) : null
+  return Object.fromEntries(Object.entries(SITE_SETTINGS_DEFAULTS).map(([k, v]) => [k, typeof doc?.[k] === 'string' ? doc[k] : v]))
+}
+
 function renderWaTemplate(tpl, donation) {
   const name = donation.is_anonymous ? 'Sahabat Donatur' : (donation.donor_name || 'Sahabat Donatur')
   const amount = 'Rp ' + Number(donation.amount || 0).toLocaleString('id-ID')
@@ -619,6 +628,10 @@ async function handleRoute(request, { params }) {
         }
       })
       return handleCORS(res)
+    }
+
+    if (route === '/site-settings' && method === 'GET') {
+      return handleCORS(NextResponse.json(await getSiteSettings(db)))
     }
 
     // ---- Home slider settings (public read: only Active + already published slides) ----
@@ -1022,6 +1035,7 @@ async function handleRoute(request, { params }) {
           return handleCORS(NextResponse.json({ items: await listAll(db, kind, ENTRY_SEEDS[kind]), db: !!db }))
         }
         if (route === '/admin/home-settings') return handleCORS(NextResponse.json({ ...(await getHomeSettings(db, seedSlides)), db: !!db }))
+        if (route === '/admin/site-settings') return handleCORS(NextResponse.json({ ...(await getSiteSettings(db)), db: !!db }))
         if (path[0] === 'admin' && path[1] === 'campaigns' && path[2]) {
           const item = await getById(db, 'program', path[2], seedCampaigns)
           if (!item) return handleCORS(NextResponse.json({ error: 'Program tidak ditemukan' }, { status: 404 }))
@@ -1104,6 +1118,16 @@ async function handleRoute(request, { params }) {
         await db.collection('settings').updateOne({ id: 'wa_settings' }, { $set: update }, { upsert: true })
         return handleCORS(NextResponse.json({ ok: true, ...update, token_configured: !!process.env.FONNTE_TOKEN }))
       }
+      if (route === '/admin/site-settings' && method === 'POST') {
+        const body = await request.json()
+        const update = Object.fromEntries(Object.keys(SITE_SETTINGS_DEFAULTS).map((k) => [k, String(body[k] ?? '').trim()]))
+        if (normalizeWa(update.whatsapp).length < 10) return handleCORS(NextResponse.json({ error: 'Nomor WhatsApp narahubung tidak valid.', fields: ['whatsapp'] }, { status: 400 }))
+        const badLinks = SOCIAL_KEYS.filter((k) => update[k] && !/^https?:\/\//i.test(update[k]))
+        if (badLinks.length) return handleCORS(NextResponse.json({ error: 'Link media sosial harus diawali https://', fields: badLinks }, { status: 400 }))
+        await db.collection('settings').updateOne({ id: 'site_settings' }, { $set: { id: 'site_settings', ...update, updated_at: new Date().toISOString() } }, { upsert: true })
+        return handleCORS(NextResponse.json({ ok: true, ...update }))
+      }
+
       // Send a test WhatsApp message (awaited so admin gets immediate feedback)
       if (route === '/admin/wa-test' && method === 'POST') {
         const body = await request.json()

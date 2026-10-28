@@ -1,4 +1,8 @@
-import { WHATSAPP_ADMIN, WA_INQUIRY_MESSAGE, waLink } from '@/lib/site-data';
+'use client';
+
+import { usePathname } from 'next/navigation';
+import { waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 
 function WhatsAppGlyph() {
   return (
@@ -9,9 +13,12 @@ function WhatsAppGlyph() {
 }
 
 export default function FloatingWa() {
+  const pathname = usePathname();
+  const s = useSiteSettings();
+  if (pathname && pathname.startsWith('/admin')) return null;
   return (
     <a
-      href={waLink(WHATSAPP_ADMIN, WA_INQUIRY_MESSAGE)}
+      href={waLink(s.whatsapp, s.wa_message)}
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chat WhatsApp Yayasan Banua Berkah Mandiri"

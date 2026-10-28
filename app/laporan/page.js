@@ -8,7 +8,8 @@ import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatRupiah, IMPACT_STATS, ORG, CATEGORY_LABEL } from '@/lib/site-data';
+import { formatRupiah, IMPACT_STATS, CATEGORY_LABEL } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 import { FileBarChart, ShieldCheck, TrendingUp, Users, HandCoins, Target, Printer, Heart, PieChart as PieIcon, Calendar, BarChart3 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
@@ -22,6 +23,7 @@ const shortRp = (n) => {
 };
 
 export default function LaporanPage() {
+  const site = useSiteSettings();
   const [year, setYear] = useState('all');
   const { data: report } = useApi(`/api/reports?year=${year}`);
 
@@ -189,7 +191,7 @@ export default function LaporanPage() {
             <div>
               <h3 className="font-heading font-bold text-xl text-brand-ink">Komitmen Transparansi &amp; Legalitas</h3>
               <p className="text-muted-foreground mt-2 text-sm leading-relaxed">Yayasan Banua Berkah Mandiri berkomitmen mengelola dana umat secara amanah, transparan, dan sesuai syariat. Laporan penyaluran lengkap beserta dokumentasi tersedia bagi para donatur secara berkala.</p>
-              <p className="text-sm mt-3">Terdaftar &amp; Sah — Akta Kemenkumham RI: <span className="font-semibold text-brand-ink">{ORG.ahu}</span></p>
+              <p className="text-sm mt-3">Terdaftar &amp; Sah — Akta Kemenkumham RI: <span className="font-semibold text-brand-ink">{site.ahu}</span></p>
             </div>
           </div>
         </Card>

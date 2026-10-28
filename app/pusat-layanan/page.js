@@ -9,12 +9,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import ZakatCalculator from '@/components/site/zakat-calculator';
-import { BANKS, WHATSAPP_ADMIN, ORG, waLink } from '@/lib/site-data';
+import { BANKS, waLink } from '@/lib/site-data';
+import { useSiteSettings } from '@/components/site/use-site-settings';
 import { Calculator, MessageCircleQuestion, ReceiptText, MapPin, Phone, Mail, Clock, Loader2, Upload, MessageCircle, CheckCircle2 } from 'lucide-react';
 
 const INIT = { name: '', whatsapp: '', bank: 'bsi', amount: '', program: '', note: '', proof_image: null, proof_name: null };
 
 export default function PusatLayananPage() {
+  const site = useSiteSettings();
   const [form, setForm] = useState(INIT);
   const [fileName, setFileName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,7 +43,7 @@ export default function PusatLayananPage() {
     finally { setLoading(false); }
   };
 
-  const consultWa = waLink(WHATSAPP_ADMIN, 'Halo Admin YABABERMA, saya ingin berkonsultasi mengenai zakat.');
+  const consultWa = waLink(site.whatsapp, 'Halo Admin YABABERMA, saya ingin berkonsultasi mengenai zakat.');
 
   return (
     <div>
@@ -135,9 +137,9 @@ export default function PusatLayananPage() {
             <p className="text-brand-green font-semibold text-sm uppercase tracking-wide mb-2 flex items-center gap-2"><MapPin className="w-4 h-4" />Kantor Layanan</p>
             <h2 className="text-2xl md:text-3xl font-extrabold text-brand-ink">Kunjungi Kami di Banjarmasin</h2>
             <div className="mt-6 space-y-4">
-              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><MapPin className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Alamat</p><p className="text-muted-foreground text-sm">{ORG.address}</p></div></div>
-              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><Phone className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Telepon / WhatsApp</p><p className="text-muted-foreground text-sm">{ORG.phone}</p></div></div>
-              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><Mail className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Email</p><p className="text-muted-foreground text-sm">{ORG.email}</p></div></div>
+              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><MapPin className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Alamat</p><p className="text-muted-foreground text-sm">{site.address}</p></div></div>
+              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><Phone className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Telepon / WhatsApp</p><p className="text-muted-foreground text-sm">{site.phone}</p></div></div>
+              <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><Mail className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Email</p><p className="text-muted-foreground text-sm">{site.email}</p></div></div>
               <div className="flex gap-3"><div className="w-10 h-10 rounded-xl bg-brand-greenlight flex items-center justify-center shrink-0"><Clock className="w-5 h-5 text-brand-green" /></div><div><p className="font-semibold text-brand-ink text-sm">Jam Operasional</p><p className="text-muted-foreground text-sm">Senin - Sabtu, 08.00 - 17.00 WITA</p></div></div>
             </div>
           </div>
