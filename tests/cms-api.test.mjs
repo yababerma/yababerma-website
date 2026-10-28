@@ -485,7 +485,7 @@ test('Midtrans: Snap token on create; signed settlement verifies once; bad/forge
 
   const notify = (n) => call('POST', 'payments/midtrans/notification', { body: n })
   const base = { order_id: d.id, status_code: '200', gross_amount: '50000.00', payment_type: 'qris', transaction_status: 'settlement' }
-  const status = async () => (await call('GET', `donations/${d.id}`)).body
+  const status = async () => (await call('GET', 'admin/donations', { admin: true })).body.find((x) => x.id === d.id)
 
   assert.equal((await notify({ ...base, signature_key: 'forged' })).status, 403)
   assert.equal((await notify(signed({ ...base, gross_amount: '1000.00' }))).body.ignored, 'amount mismatch')
@@ -513,4 +513,34 @@ test('Midtrans: Snap token on create; signed settlement verifies once; bad/forge
   await call('POST', 'admin/verify', { admin: true, body: { donation_id: d.id, status: 'verified' } })
   assert.equal((await status()).status, 'verified')
   assert.equal(calls.filter((c) => c.url.includes('fonnte')).length, fonnteBefore + 1)
+})
+
+test('Security: donor data is never public; form text cannot carry markup or objects', async () => {
+  useDb()
+  const r = await call('POST', 'donations', { body: { amount: 25000, donor_name: '<img src=x onerror=alert(1)>Ani', donor_email: 'korban@contoh.com', donor_whatsapp: { $gt: '' }, message: '<script>x</script>Doa', campaign_title: 'Donasi <b>Umum</b>' } })
+  assert.equal(r.status, 200)
+  assert.equal(r.body.donor_name, 'img src=x onerror=alert(1)Ani')
+  assert.equal(r.body.donor_whatsapp, '[object Object]', 'objects are stored as plain text, never as query operators')
+  assert.equal(r.body.message, 'scriptx/scriptDoa')
+  assert.equal(r.body.campaign_title, 'Donasi bUmum/b')
+
+  assert.deepEqual((await call('GET', 'donations?email=korban@contoh.com')).body, [], 'no lookup by email without signing in')
+  assert.equal((await call('GET', `donations/${r.body.id}`)).status, 404, 'no public donation-by-id endpoint')
+
+  const c = await call('POST', 'confirmations', { body: { name: 'Budi<svg>', whatsapp: '0812', amount: 10000, proof_image: 'data:image/svg+xml;base64,PHN2Zz4=' } })
+  assert.equal(c.status, 200)
+  assert.equal(c.body.confirmation.name, 'Budisvg')
+  const saved = (await call('GET', 'admin/confirmations', { admin: true })).body.find((x) => x.id === c.body.confirmation.id)
+  assert.equal(saved.proof_image, null, 'only png/jpg/webp/gif/pdf proofs are kept')
+})
+
+test('Security: the admin reset code dies after 5 wrong guesses', async () => {
+  useDb()
+  const settings = new FakeDb().collection('settings')
+  await settings.updateOne({ id: 'admin_reset' }, { $set: { id: 'admin_reset', otp: '123456', expires_at: Date.now() + 600000 } }, { upsert: true })
+  for (let i = 0; i < 4; i++) assert.equal((await call('POST', 'admin/reset-password', { body: { otp: '000000', new_password: 'hacked-pass' } })).status, 400)
+  assert.equal((await call('POST', 'admin/reset-password', { body: { otp: '000000', new_password: 'hacked-pass' } })).status, 429)
+  const late = await call('POST', 'admin/reset-password', { body: { otp: '123456', new_password: 'hacked-pass' } })
+  assert.equal(late.status, 400, 'even the right code no longer works')
+  assert.equal(await settings.findOne({ id: 'admin_auth', password: 'hacked-pass' }), null)
 })

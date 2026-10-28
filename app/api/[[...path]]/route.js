@@ -1,6 +1,6 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import { createHash } from 'crypto'
+import { createHash, randomInt } from 'crypto'
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import {
@@ -77,6 +77,10 @@ const cleanArr = (arr) => arr.map(clean)
 const ORG_LOGO = (process.env.NEXT_PUBLIC_BASE_URL || 'https://www.yababerma.org').replace(/\/$/, '') + '/logo.png'
 const BANK_LABELS = { bsi: 'Bank Syariah Indonesia (BSI)', mandiri: 'Bank Mandiri', bca: 'Bank BCA', bri: 'Bank BRI', kalsel: 'Bank Kalsel' }
 const rp = (n) => 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
+// Public form text: always a plain string (no objects / query operators), capped, without < > so it can
+// never become markup in receipts, certificates or the admin panel.
+const txt = (v, max = 200) => String(v ?? '').replace(/[<>]/g, '').trim().slice(0, max)
+
 function escapeHtml(v = '') { return String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])) }
 
 async function sendDonationEmail(donation) {
@@ -665,6 +669,8 @@ async function handleRoute(request, { params }) {
           'Content-Disposition': `inline; filename="${(m.filename || 'file').replace(/"/g, '')}"`,
           'Content-Length': String(buf.length),
           'Cache-Control': 'public, max-age=31536000, immutable',
+          'Content-Security-Policy': 'sandbox',
+          'X-Content-Type-Options': 'nosniff',
         }
       })
       return handleCORS(res)
@@ -693,6 +699,8 @@ async function handleRoute(request, { params }) {
       const body = await request.json()
       const amount = Number(body.amount)
       if (!amount || amount < 1000) return handleCORS(NextResponse.json({ error: 'Nominal donasi tidak valid (min Rp1.000)' }, { status: 400 }))
+      for (const k of ['donor_name', 'donor_email', 'donor_whatsapp', 'campaign_slug', 'campaign_title', 'payment_method', 'donation_type', 'kurban_option']) if (body[k] != null) body[k] = txt(body[k])
+      if (body.message != null) body.message = txt(body.message, 1000)
       if (!body.donor_name || !body.donor_whatsapp) return handleCORS(NextResponse.json({ error: 'Nama dan nomor WhatsApp wajib diisi' }, { status: 400 }))
 
       const viaMidtrans = body.payment_method === 'midtrans'
@@ -753,14 +761,9 @@ async function handleRoute(request, { params }) {
     }
 
     if (route === '/donations' && method === 'GET') {
-      const url = new URL(request.url)
-      const email = url.searchParams.get('email')
       const currentUser = await getUserFromRequest(request, db)
-      const q = {}
-      if (email) q.donor_email = email
-      else if (currentUser) q.donor_email = currentUser.email
-      else return handleCORS(NextResponse.json([]))
-      const items = await db.collection('donations').find(q).sort({ created_at: -1 }).limit(200).toArray()
+      if (!currentUser?.email) return handleCORS(NextResponse.json([]))
+      const items = await db.collection('donations').find({ donor_email: currentUser.email }).sort({ created_at: -1 }).limit(200).toArray()
       return handleCORS(NextResponse.json(cleanArr(items)))
     }
 
@@ -781,13 +784,6 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ ok: true }))
     }
 
-    // single donation by id (for receipt / summary)
-    if (path[0] === 'donations' && path[1] && method === 'GET') {
-      const item = await db.collection('donations').findOne({ id: path[1] })
-      if (!item) return handleCORS(NextResponse.json({ error: 'Donation not found' }, { status: 404 }))
-      return handleCORS(NextResponse.json(clean(item)))
-    }
-
     // ---- Newsletter ----
     if (route === '/newsletter' && method === 'POST') {
       const body = await request.json()
@@ -800,6 +796,9 @@ async function handleRoute(request, { params }) {
     // ---- Manual confirmation ----
     if (route === '/confirmations' && method === 'POST') {
       const body = await request.json()
+      for (const k of ['name', 'whatsapp', 'bank', 'program', 'proof_name']) if (body[k] != null) body[k] = txt(body[k])
+      if (body.note != null) body.note = txt(body.note, 1000)
+      if (body.proof_image != null && !/^data:(image\/(png|jpe?g|webp|gif)|application\/pdf);base64,/.test(String(body.proof_image))) body.proof_image = null
       if (!body.name || !body.whatsapp || !body.amount) return handleCORS(NextResponse.json({ error: 'Nama, WhatsApp, dan nominal wajib diisi' }, { status: 400 }))
       const conf = {
         id: uuidv4(),
@@ -1064,7 +1063,7 @@ async function handleRoute(request, { params }) {
       if (existing && existing.last_sent && now - existing.last_sent < 60000) {
         return handleCORS(NextResponse.json({ error: 'Mohon tunggu 1 menit sebelum meminta kode baru.' }, { status: 429 }))
       }
-      const otp = String(Math.floor(100000 + Math.random() * 900000))
+      const otp = String(randomInt(100000, 1000000))
       await db.collection('settings').updateOne({ id: 'admin_reset' }, { $set: { id: 'admin_reset', otp, expires_at: now + 10 * 60 * 1000, last_sent: now } }, { upsert: true })
       const sent = await sendAdminOtpEmail(otp)
       if (!sent) return handleCORS(NextResponse.json({ error: 'Gagal mengirim email kode. Coba lagi nanti.' }, { status: 502 }))
@@ -1082,7 +1081,16 @@ async function handleRoute(request, { params }) {
       const rec = await db.collection('settings').findOne({ id: 'admin_reset' })
       if (!rec || !rec.otp) return handleCORS(NextResponse.json({ error: 'Belum ada permintaan reset. Klik "Lupa Password" dulu.' }, { status: 400 }))
       if (Date.now() > (rec.expires_at || 0)) return handleCORS(NextResponse.json({ error: 'Kode sudah kedaluwarsa. Minta kode baru.' }, { status: 400 }))
-      if (otp !== rec.otp) return handleCORS(NextResponse.json({ error: 'Kode verifikasi salah.' }, { status: 400 }))
+      if (otp !== rec.otp) {
+        // 5 wrong guesses burn the code, so the 6 digits cannot be brute-forced within its 10 minutes
+        const attempts = (rec.attempts || 0) + 1
+        if (attempts >= 5) {
+          await db.collection('settings').deleteOne({ id: 'admin_reset' })
+          return handleCORS(NextResponse.json({ error: 'Terlalu banyak percobaan. Minta kode baru.' }, { status: 429 }))
+        }
+        await db.collection('settings').updateOne({ id: 'admin_reset' }, { $set: { attempts } })
+        return handleCORS(NextResponse.json({ error: 'Kode verifikasi salah.' }, { status: 400 }))
+      }
       await db.collection('settings').updateOne({ id: 'admin_auth' }, { $set: { id: 'admin_auth', password: newPass, updated_at: new Date().toISOString() } }, { upsert: true })
       await db.collection('settings').deleteOne({ id: 'admin_reset' })
       return handleCORS(NextResponse.json({ ok: true }))
