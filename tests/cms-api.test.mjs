@@ -447,3 +447,70 @@ test('Identitas & Kontak: defaults without DB, admin edit shows publicly, bad in
   assert.deepEqual(badLink.body.fields, ['facebook'])
   assert.equal((await call('GET', 'site-settings')).body.facebook, def.facebook, 'rejected save changes nothing')
 })
+
+// ================= Midtrans: automatic donations =================
+const { createHash } = await import('node:crypto')
+const signed = (n) => ({ ...n, signature_key: createHash('sha512').update(`${n.order_id}${n.status_code}${n.gross_amount}${process.env.MIDTRANS_SERVER_KEY}`).digest('hex') })
+
+test('Midtrans: Snap token on create; signed settlement verifies once; bad/forged notifications change nothing', async (t) => {
+  useDb()
+  const realFetch = globalThis.fetch
+  const calls = []
+  let snapOk = true
+  globalThis.fetch = async (url, opts = {}) => {
+    calls.push({ url: String(url), opts })
+    if (String(url).includes('fonnte')) return new Response(JSON.stringify({ status: true, id: ['1'] }))
+    return snapOk ? new Response(JSON.stringify({ token: 'snap-tok' }), { status: 201 }) : new Response(JSON.stringify({ error_messages: ['Access denied'] }), { status: 401 })
+  }
+  t.after(() => { globalThis.fetch = realFetch; delete process.env.MIDTRANS_SERVER_KEY; delete process.env.FONNTE_TOKEN })
+  const body = { amount: 50000, donor_name: 'Budi', donor_whatsapp: '081234567890', payment_method: 'midtrans', campaign_title: 'Donasi Umum' }
+
+  assert.equal((await call('POST', 'donations', { body })).status, 400, 'refused while Midtrans is not configured')
+
+  process.env.MIDTRANS_SERVER_KEY = 'SB-Mid-server-test'
+  process.env.FONNTE_TOKEN = 'test-token'
+  snapOk = false
+  assert.equal((await call('POST', 'donations', { body })).status, 502, 'Snap failure is reported')
+  snapOk = true
+
+  const created = await call('POST', 'donations', { body })
+  assert.equal(created.status, 200)
+  const d = created.body
+  assert.equal(d.snap_token, 'snap-tok')
+  assert.equal(d.unique_code, 0)
+  assert.equal(d.total_amount, 50000)
+  const snapCall = calls.find((c) => c.url.includes('/snap/v1/transactions'))
+  assert.ok(snapCall.url.startsWith('https://app.sandbox.midtrans.com'), 'SB- key -> sandbox')
+  assert.equal(JSON.parse(snapCall.opts.body).transaction_details.gross_amount, 50000)
+
+  const notify = (n) => call('POST', 'payments/midtrans/notification', { body: n })
+  const base = { order_id: d.id, status_code: '200', gross_amount: '50000.00', payment_type: 'qris', transaction_status: 'settlement' }
+  const status = async () => (await call('GET', `donations/${d.id}`)).body
+
+  assert.equal((await notify({ ...base, signature_key: 'forged' })).status, 403)
+  assert.equal((await notify(signed({ ...base, gross_amount: '1000.00' }))).body.ignored, 'amount mismatch')
+  assert.equal((await status()).status, 'pending')
+
+  await notify(signed({ ...base, status_code: '201', transaction_status: 'pending' }))
+  assert.equal((await status()).status, 'pending')
+  assert.equal((await status()).midtrans_status, 'pending')
+
+  const fonnteBefore = calls.filter((c) => c.url.includes('fonnte')).length
+  assert.equal((await notify(signed(base))).status, 200)
+  const paid = await status()
+  assert.equal(paid.status, 'verified')
+  assert.equal(paid.payment_type, 'qris')
+  assert.ok(paid.wa_thanked_at, 'WhatsApp thank-you sent')
+  assert.equal(calls.filter((c) => c.url.includes('fonnte')).length, fonnteBefore + 1)
+
+  await notify(signed(base)) // Midtrans retries notifications
+  assert.equal(calls.filter((c) => c.url.includes('fonnte')).length, fonnteBefore + 1, 'no second WhatsApp')
+  assert.equal((await notify(signed({ ...base, order_id: 'not-ours' }))).body.ignored, 'unknown order')
+
+  // admin can still undo / redo, without a second WhatsApp
+  await call('POST', 'admin/verify', { admin: true, body: { donation_id: d.id, status: 'pending' } })
+  assert.equal((await status()).status, 'pending')
+  await call('POST', 'admin/verify', { admin: true, body: { donation_id: d.id, status: 'verified' } })
+  assert.equal((await status()).status, 'verified')
+  assert.equal(calls.filter((c) => c.url.includes('fonnte')).length, fonnteBefore + 1)
+})

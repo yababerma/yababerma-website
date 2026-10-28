@@ -27,6 +27,11 @@ const CHART_COLORS = ['#00A651', '#0082C8', '#F59E0B', '#8B5CF6', '#EF4444', '#1
 
 const KEY_STORAGE = 'yb_admin_key';
 
+// "Midtrans · qris", or why it is not paid yet (expire, cancel, ...). Midtrans donations verify themselves.
+const midtransLabel = (d) => d.payment_method === 'midtrans'
+  ? `Midtrans · ${d.payment_type || 'belum dibayar'}${d.midtrans_status && !['settlement', 'capture'].includes(d.midtrans_status) ? ` (${d.midtrans_status})` : ''}`
+  : '';
+
 export default function AdminPage() {
   const [key, setKey] = useState('');
   const [authed, setAuthed] = useState(false);
@@ -567,7 +572,7 @@ export default function AdminPage() {
                         <div className="mt-3 flex items-center justify-between"><span className="font-semibold text-brand-ink">{d.is_anonymous ? 'Hamba Allah' : d.donor_name}</span><span className="font-bold text-brand-green">{formatRupiah(d.amount)}</span></div>
                         <p className="text-xs text-muted-foreground mt-1 truncate">{d.campaign_title}</p>
                         <p className="text-xs text-muted-foreground truncate">WA: {d.donor_whatsapp}{d.donor_email ? ` • ${d.donor_email}` : ''}</p>
-                        <p className="text-[11px] text-muted-foreground mt-1">{new Date(d.created_at).toLocaleString('id-ID')}</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">{new Date(d.created_at).toLocaleString('id-ID')}{midtransLabel(d) && ` • ${midtransLabel(d)}`}</p>
                         <div className="mt-3">
                           {d.status === 'verified' ? <Button size="sm" variant="ghost" className="rounded-lg text-muted-foreground w-full" disabled={busy === d.id} onClick={() => verify(d.id, 'pending')}><RotateCcw className="w-4 h-4 mr-1" />Batalkan</Button> : <Button size="sm" className="rounded-lg w-full" disabled={busy === d.id} onClick={() => verify(d.id, 'verified')}>{busy === d.id ? <Loader2 className="w-4 h-4 animate-spin" /> : (<><CheckCircle2 className="w-4 h-4 mr-1" />Verifikasi</>)}</Button>}
                         </div>
@@ -601,7 +606,7 @@ export default function AdminPage() {
                             <TableCell className="text-sm"><div className="font-medium">{d.is_anonymous ? 'Hamba Allah' : d.donor_name}</div><div className="text-xs text-muted-foreground">{d.donor_whatsapp}</div></TableCell>
                             <TableCell className="text-sm max-w-[180px] truncate">{d.campaign_title}</TableCell>
                             <TableCell className="text-right text-sm font-semibold whitespace-nowrap">{formatRupiah(d.amount)}</TableCell>
-                            <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{formatRupiah(d.total_amount)}</TableCell>
+                            <TableCell className="text-right text-sm text-muted-foreground whitespace-nowrap">{formatRupiah(d.total_amount)}{midtransLabel(d) && <div className="text-[11px] text-brand-blue">{midtransLabel(d)}</div>}</TableCell>
                             <TableCell>{d.status === 'verified' ? <Badge className="bg-brand-greenlight text-brand-green border-0 hover:bg-brand-greenlight">Terverifikasi</Badge> : <Badge variant="secondary" className="bg-amber-100 text-amber-700 border-0 hover:bg-amber-100">Pending</Badge>}</TableCell>
                             <TableCell className="text-right">
                               {d.status === 'verified' ? (

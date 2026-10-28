@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,23 @@ import { downloadGreetingCard, shareGreetingWhatsApp, getGreetingDataUrl } from 
 
 const QUICK = [10000, 50000, 100000, 250000, 500000, 1000000];
 
+// Midtrans Snap (QRIS, e-wallet, Virtual Account): offered only once the client key is configured.
+// Sandbox keys start with "SB-"; the payment page is embedded in this dialog (a Snap popup would sit behind it).
+const MIDTRANS_CLIENT_KEY = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY;
+let snapScript;
+function loadSnap() {
+  if (window.snap) return Promise.resolve(window.snap);
+  snapScript ||= new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = MIDTRANS_CLIENT_KEY.startsWith('SB-') ? 'https://app.sandbox.midtrans.com/snap/snap.js' : 'https://app.midtrans.com/snap/snap.js';
+    el.dataset.clientKey = MIDTRANS_CLIENT_KEY;
+    el.onload = () => resolve(window.snap);
+    el.onerror = () => { snapScript = null; reject(new Error('snap.js')); };
+    document.head.appendChild(el);
+  });
+  return snapScript;
+}
+
 export function DonationDialog({ open, setOpen, campaign, presetAmount, presetType, kurbanOption, kurbanQty }) {
   const site = useSiteSettings();
   const [step, setStep] = useState(1);
@@ -24,16 +41,20 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
   const [form, setForm] = useState({ donor_name: '', donor_email: '', donor_whatsapp: '', message: '' });
   const [anon, setAnon] = useState(false);
   const [showOnWall, setShowOnWall] = useState(true);
-  const [bank, setBank] = useState('bsi');
+  const [bank, setBank] = useState(MIDTRANS_CLIENT_KEY ? 'midtrans' : 'bsi');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [cardPreview, setCardPreview] = useState(null);
+  const [snapPending, setSnapPending] = useState(false);
+  const embeddedToken = useRef(null);
 
   useEffect(() => {
     if (open) {
       setStep(1);
       setResult(null);
       setCardPreview(null);
+      setSnapPending(false);
+      embeddedToken.current = null;
       setShowOnWall(true);
       if (presetAmount) { setAmount(presetAmount); setCustom(String(presetAmount)); }
     }
@@ -45,6 +66,20 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
       return () => clearTimeout(id);
     }
   }, [result, step]);
+
+  const paid = result?.status === 'verified';
+  useEffect(() => {
+    const token = result?.snap_token;
+    if (step !== 4 || !token || paid || embeddedToken.current === token) return;
+    embeddedToken.current = token;
+    loadSnap().then((snap) => snap.embed(token, {
+      embedId: 'snap-container',
+      onSuccess: () => setResult((r) => ({ ...r, status: 'verified' })),
+      onPending: () => setSnapPending(true),
+      onError: () => toast.error('Pembayaran gagal. Silakan coba metode lain.'),
+      onClose: () => toast('Pembayaran belum diselesaikan.'),
+    })).catch(() => toast.error('Halaman pembayaran gagal dimuat. Periksa koneksi Anda.'));
+  }, [step, result, paid]);
 
   const selectedBank = BANKS.find((b) => b.code === bank) || BANKS[0];
   const finalAmount = custom ? Number(custom) : amount;
@@ -98,7 +133,7 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
         <DialogHeader className="p-5 pb-4 border-b border-border bg-brand-greenlight/50 text-left space-y-1">
           <DialogTitle className="flex items-center gap-2 text-brand-ink">
             <Heart className="w-5 h-5 text-brand-green" />
-            {step < 4 ? 'Tunaikan Donasi' : 'Selesaikan Pembayaran'}
+            {step < 4 ? 'Tunaikan Donasi' : paid ? 'Jazaakumullahu Khairan' : 'Selesaikan Pembayaran'}
           </DialogTitle>
           {campaign && <p className="text-sm text-muted-foreground line-clamp-1">{campaign.title}</p>}
         </DialogHeader>
@@ -151,8 +186,17 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
 
           {step === 3 && (
             <div className="space-y-3">
-              <p className="text-sm font-medium text-brand-ink">Pilih metode transfer bank</p>
+              <p className="text-sm font-medium text-brand-ink">Pilih metode pembayaran</p>
               <div className="space-y-2">
+                {MIDTRANS_CLIENT_KEY && (
+                  <>
+                    <button onClick={() => setBank('midtrans')} className={`w-full flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition ${bank === 'midtrans' ? 'border-brand-green bg-brand-greenlight' : 'border-border hover:border-brand-green/50'}`}>
+                      <span><span className="block text-sm font-semibold">Bayar Otomatis</span><span className="block text-xs text-muted-foreground">QRIS, GoPay, ShopeePay, Virtual Account — langsung terverifikasi</span></span>
+                      {bank === 'midtrans' && <Check className="w-4 h-4 text-brand-green shrink-0" />}
+                    </button>
+                    <p className="text-xs text-muted-foreground pt-1">Atau transfer manual ke rekening yayasan:</p>
+                  </>
+                )}
                 {BANKS.map((b) => (
                   <button key={b.code} onClick={() => setBank(b.code)} className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition ${bank === b.code ? 'border-brand-green bg-brand-greenlight' : 'border-border hover:border-brand-green/50'}`}>
                     <span className="text-sm font-medium">{b.name}</span>
@@ -170,6 +214,19 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
 
           {step === 4 && result && (
             <div className="space-y-4">
+              {result.snap_token ? (paid ? (
+                <div className="flex items-center gap-2 text-brand-green bg-brand-greenlight rounded-xl p-3 text-sm">
+                  <PartyPopper className="w-5 h-5 shrink-0" /> Alhamdulillah, pembayaran berhasil. Donasi Anda otomatis terverifikasi.
+                </div>
+              ) : (
+                <>
+                  <div id="snap-container" className="min-h-[520px]" />
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-brand-bluelight/50 rounded-xl p-3">
+                    <ShieldCheck className="w-4 h-4 text-brand-blue shrink-0 mt-0.5" />
+                    {snapPending ? 'Selesaikan pembayaran sesuai instruksi di atas. ' : ''}Pembayaran diproses Midtrans dan donasi otomatis terverifikasi setelah dibayar — tidak perlu konfirmasi manual.
+                  </div>
+                </>
+              )) : (<>
               <div className="flex items-center gap-2 text-brand-green bg-brand-greenlight rounded-xl p-3 text-sm">
                 <PartyPopper className="w-5 h-5" /> Donasi tercatat! Selesaikan transfer di bawah ini.
               </div>
@@ -193,6 +250,8 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
               <a href={waHref} target="_blank" rel="noopener noreferrer" onClick={() => setTimeout(() => setOpen(false), 500)} className="block">
                 <Button className="w-full rounded-xl bg-[#25D366] hover:bg-[#1eb659] text-white h-12 text-base font-semibold"><MessageCircle className="w-5 h-5 mr-2" />Konfirmasi via WhatsApp</Button>
               </a>
+              </>)}
+              {(!result.snap_token || paid) && (<>
               {isKurbanDonation(result) && (
                 <Button variant="outline" onClick={() => downloadKurbanCertificate(result)} className="w-full rounded-xl border-brand-green text-brand-green hover:bg-brand-greenlight"><Award className="w-4 h-4 mr-2" />Unduh Sertifikat Kurban</Button>
               )}
@@ -222,8 +281,9 @@ export function DonationDialog({ open, setOpen, campaign, presetAmount, presetTy
                   <Button variant="outline" onClick={() => shareGreetingWhatsApp(result)} className="rounded-xl border-[#25D366] text-[#128C4B] hover:bg-[#25D366]/10"><Share2 className="w-4 h-4 mr-2" />Bagikan</Button>
                 </div>
               </div>
+              </>)}
 
-              <button className="w-full text-center text-sm text-muted-foreground hover:text-brand-ink" onClick={() => setOpen(false)}>Nanti saja, tutup</button>
+              <button className="w-full text-center text-sm text-muted-foreground hover:text-brand-ink" onClick={() => setOpen(false)}>{result.snap_token && !paid ? 'Tutup' : 'Nanti saja, tutup'}</button>
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
+import { createHash } from 'crypto'
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import {
@@ -584,6 +585,45 @@ async function sendWhatsAppThankYou(donation, template) {
   return fonnteSend(donation.donor_whatsapp, renderWaTemplate(template, donation))
 }
 
+// Verified (by an admin, or by a paid Midtrans notification): thank-you email + WhatsApp (WA only once).
+// `sent` settles when both are done; the webhook awaits it, the admin panel does not.
+async function markVerified(db, id) {
+  await db.collection('donations').updateOne({ id }, { $set: { status: 'verified', verified_at: new Date().toISOString() } })
+  const d = await db.collection('donations').findOne({ id })
+  if (!d) return { donation: null, sent: Promise.resolve() }
+  const sent = Promise.allSettled([
+    sendVerifiedEmail(clean(d)),
+    !d.wa_thanked_at && getWaSettings(db).then((wa) => sendWhatsAppThankYou(clean(d), wa.thank_you_template)).then((ok) => {
+      if (ok) return db.collection('donations').updateOne({ id: d.id }, { $set: { wa_thanked_at: new Date().toISOString() } })
+    }),
+  ])
+  return { donation: d, sent }
+}
+
+// ---- Midtrans Snap: donasi otomatis (QRIS, e-wallet, Virtual Account) ----
+// Inert until MIDTRANS_SERVER_KEY is set. Sandbox keys start with "SB-", so the key alone picks sandbox or live.
+const midtransBase = () => (process.env.MIDTRANS_SERVER_KEY.startsWith('SB-') ? 'https://app.sandbox.midtrans.com' : 'https://app.midtrans.com')
+
+async function createSnapToken(donation) {
+  try {
+    const res = await fetch(midtransBase() + '/snap/v1/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Basic ' + Buffer.from(process.env.MIDTRANS_SERVER_KEY + ':').toString('base64') },
+      body: JSON.stringify({
+        transaction_details: { order_id: donation.id, gross_amount: donation.total_amount },
+        item_details: [{ id: donation.campaign_slug || 'donasi', price: donation.total_amount, quantity: 1, name: String(donation.campaign_title).slice(0, 50) }],
+        customer_details: { first_name: donation.donor_name, email: donation.donor_email || undefined, phone: donation.donor_whatsapp },
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.token) { console.error('Midtrans Snap gagal:', res.status, JSON.stringify(data.error_messages || data)); return null }
+    return data.token
+  } catch (e) { console.error('Midtrans Snap exception:', e?.message); return null }
+}
+
+const midtransSignature = (n) => createHash('sha512').update(`${n.order_id}${n.status_code}${n.gross_amount}${process.env.MIDTRANS_SERVER_KEY}`).digest('hex')
+
 // Admin URL segment -> CMS entry kind, and the demo content each kind shows without a database.
 const ENTRY_ROUTES = { testimonials: 'testimonial', communities: 'community', partners: 'partner', authors: 'author' }
 const ENTRY_SEEDS = { testimonial: seedTestimonials, community: seedCommunities, partner: seedPartners, author: seedAuthors }
@@ -655,8 +695,12 @@ async function handleRoute(request, { params }) {
       if (!amount || amount < 1000) return handleCORS(NextResponse.json({ error: 'Nominal donasi tidak valid (min Rp1.000)' }, { status: 400 }))
       if (!body.donor_name || !body.donor_whatsapp) return handleCORS(NextResponse.json({ error: 'Nama dan nomor WhatsApp wajib diisi' }, { status: 400 }))
 
+      const viaMidtrans = body.payment_method === 'midtrans'
+      if (viaMidtrans && !process.env.MIDTRANS_SERVER_KEY) return handleCORS(NextResponse.json({ error: 'Pembayaran otomatis belum diaktifkan. Silakan pilih transfer bank.' }, { status: 400 }))
+
       const campaign = body.campaign_slug ? await db.collection('campaigns').findOne({ slug: body.campaign_slug }) : null
-      const unique_code = Math.floor(Math.random() * 899) + 100 // 100..999
+      // Midtrans confirms the payment itself, so only manual transfers need a unique code to be matched.
+      const unique_code = viaMidtrans ? 0 : Math.floor(Math.random() * 899) + 100 // 100..999
       const total_amount = amount + unique_code
 
       const currentUser = await getUserFromRequest(request, db)
@@ -682,7 +726,13 @@ async function handleRoute(request, { params }) {
         user_id: currentUser ? currentUser.id : null,
         created_at: new Date().toISOString(),
       }
+      if (viaMidtrans) {
+        donation.snap_token = await createSnapToken(donation)
+        if (!donation.snap_token) return handleCORS(NextResponse.json({ error: 'Gagal membuka pembayaran otomatis. Silakan coba lagi atau pilih transfer bank.' }, { status: 502 }))
+      }
       await db.collection('donations').insertOne({ ...donation })
+      // A Midtrans donation is unpaid until its notification arrives; the donor's thank-you is sent then.
+      if (viaMidtrans) return handleCORS(NextResponse.json(donation))
 
       // Campaign progress numbers (collected_amount & donor_count) are now MANAGED MANUALLY
       // by admin via the panel (per configuration). New donations no longer auto-increment them.
@@ -712,6 +762,23 @@ async function handleRoute(request, { params }) {
       else return handleCORS(NextResponse.json([]))
       const items = await db.collection('donations').find(q).sort({ created_at: -1 }).limit(200).toArray()
       return handleCORS(NextResponse.json(cleanArr(items)))
+    }
+
+    // ---- Midtrans payment notification (webhook; URL set in the Midtrans dashboard) ----
+    if (route === '/payments/midtrans/notification' && method === 'POST') {
+      const n = await request.json()
+      if (!process.env.MIDTRANS_SERVER_KEY || n.signature_key !== midtransSignature(n)) return handleCORS(NextResponse.json({ error: 'Invalid signature' }, { status: 403 }))
+      const d = await db.collection('donations').findOne({ id: n.order_id })
+      // 200 for unknown orders (e.g. the dashboard's test notification) so Midtrans does not keep retrying.
+      if (!d) return handleCORS(NextResponse.json({ ok: true, ignored: 'unknown order' }))
+      if (Number(n.gross_amount) !== Number(d.total_amount)) {
+        console.error('Midtrans: nominal tidak cocok', d.id, n.gross_amount, d.total_amount)
+        return handleCORS(NextResponse.json({ ok: true, ignored: 'amount mismatch' }))
+      }
+      await db.collection('donations').updateOne({ id: d.id }, { $set: { midtrans_status: n.transaction_status, payment_type: n.payment_type || null } })
+      const paid = n.transaction_status === 'settlement' || (n.transaction_status === 'capture' && n.fraud_status === 'accept')
+      if (paid && d.status !== 'verified') await (await markVerified(db, d.id)).sent
+      return handleCORS(NextResponse.json({ ok: true }))
     }
 
     // single donation by id (for receipt / summary)
@@ -1076,17 +1143,11 @@ async function handleRoute(request, { params }) {
       if (route === '/admin/verify' && method === 'POST') {
         const body = await request.json()
         if (!body.donation_id) return handleCORS(NextResponse.json({ error: 'donation_id wajib' }, { status: 400 }))
-        const status = body.status === 'verified' ? 'verified' : 'pending'
-        await db.collection('donations').updateOne({ id: body.donation_id }, { $set: { status, verified_at: status === 'verified' ? new Date().toISOString() : null } })
-        const d = await db.collection('donations').findOne({ id: body.donation_id })
-        if (d && status === 'verified') {
-          sendVerifiedEmail(clean(d)).catch(() => { })
-          // Fire-and-forget WhatsApp thank-you (idempotent) via Fonnte, using admin-editable template
-          if (!d.wa_thanked_at) {
-            getWaSettings(db).then((wa) => sendWhatsAppThankYou(clean(d), wa.thank_you_template)).then((ok) => {
-              if (ok) db.collection('donations').updateOne({ id: d.id }, { $set: { wa_thanked_at: new Date().toISOString() } }).catch(() => { })
-            }).catch(() => { })
-          }
+        let d
+        if (body.status === 'verified') d = (await markVerified(db, body.donation_id)).donation
+        else {
+          await db.collection('donations').updateOne({ id: body.donation_id }, { $set: { status: 'pending', verified_at: null } })
+          d = await db.collection('donations').findOne({ id: body.donation_id })
         }
         return handleCORS(NextResponse.json({ ok: true, donation: d ? clean(d) : null }))
       }
