@@ -1,0 +1,2 @@
+# Simpan semua teks dengan LF di repo dan di disk, juga di Windows (Git for Windows default-nya CRLF).
+* text=auto eol=lf
