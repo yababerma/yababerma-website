@@ -1,6 +1,6 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
-import { createHash, randomInt } from 'crypto'
+import { createHash, randomInt, randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import {
@@ -57,12 +57,43 @@ async function connectToMongo() {
 const NO_DB_MESSAGE = 'Database belum dikonfigurasi di server (MONGO_URL). Hubungi administrator.'
 const noDbResponse = () => handleCORS(NextResponse.json({ error: NO_DB_MESSAGE, db_missing: true }, { status: 503 }))
 
+// The site calls its own API (same origin), so no cross-origin access unless CORS_ORIGINS names one.
 function handleCORS(response) {
-  response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*')
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  response.headers.set('Access-Control-Allow-Credentials', 'true')
+  if (process.env.CORS_ORIGINS) {
+    response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS)
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-admin-key')
+  }
   return response
+}
+
+// ---------------- Rate limiting ----------------
+// Vercel sets x-forwarded-for itself, so the first entry is the real client.
+const clientIp = (request) => (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown'
+const MINUTE = 60 * 1000
+const ADMIN_MAX_FAILS = 10
+
+// Fixed-window counter in `rate_limits`. Counts this hit and returns true once the caller is over `max`.
+// shortcut: read-then-write (not atomic) and rows are never purged; fine at this traffic, add a TTL index if it grows.
+async function rateLimited(db, key, max, windowMs) {
+  if (!db) return false
+  const now = Date.now()
+  const rec = await db.collection('rate_limits').findOne({ id: key })
+  const fresh = !rec || now > rec.reset_at
+  const count = fresh ? 1 : rec.count + 1
+  await db.collection('rate_limits').updateOne({ id: key }, { $set: { id: key, count, reset_at: fresh ? now + windowMs : rec.reset_at } }, { upsert: true })
+  return count > max
+}
+const tooMany = () => handleCORS(NextResponse.json({ error: 'Terlalu banyak percobaan. Silakan coba lagi beberapa menit lagi.' }, { status: 429 }))
+
+// Admin key check with a lockout: 10 wrong keys from one IP block that IP for 15 minutes.
+async function checkAdminKey(db, request, provided) {
+  const key = 'admin:' + clientIp(request)
+  const rec = db ? await db.collection('rate_limits').findOne({ id: key }) : null
+  if (rec && Date.now() < rec.reset_at && rec.count >= ADMIN_MAX_FAILS) return 'locked'
+  if (await isValidAdminKey(db, provided)) return 'ok'
+  await rateLimited(db, key, ADMIN_MAX_FAILS, 15 * MINUTE)
+  return 'bad'
 }
 
 export async function OPTIONS() {
@@ -474,26 +505,32 @@ async function getUserFromRequest(request, db) {
 // through the panel (change-password / OTP reset).
 const DEFAULT_ADMIN_KEY = 'yababerma-admin-2026'
 
-async function getValidAdminKeys(db) {
-  const keys = new Set()
-  const envKey = String(process.env.ADMIN_KEY || '').trim()
-  if (envKey) keys.add(envKey)
-  if (db) {
-    try {
-      const doc = await db.collection('settings').findOne({ id: 'admin_auth' })
-      const stored = doc && typeof doc.password === 'string' ? doc.password.trim() : ''
-      if (stored) keys.add(stored)
-    } catch (e) { console.error('Admin key lookup error:', e?.message || e) }
-  }
-  if (keys.size === 0) keys.add(DEFAULT_ADMIN_KEY)
-  return keys
+const safeEq = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y) }
+// Panel password is stored as "scrypt:<salt>:<hash>"; a value without that prefix is a legacy plain-text one.
+function hashPassword(pw) {
+  const salt = randomBytes(16).toString('hex')
+  return `scrypt:${salt}:${scryptSync(pw, salt, 32).toString('hex')}`
+}
+function passwordMatches(stored, pw) {
+  if (!stored.startsWith('scrypt:')) return safeEq(stored, pw)
+  const [, salt, hash] = stored.split(':')
+  return safeEq(scryptSync(pw, salt, 32).toString('hex'), hash)
 }
 
 async function isValidAdminKey(db, provided) {
   const key = String(provided || '').trim()
   if (!key) return false
-  const valid = await getValidAdminKeys(db)
-  return valid.has(key)
+  const envKey = String(process.env.ADMIN_KEY || '').trim()
+  if (envKey && safeEq(envKey, key)) return true
+  let stored = ''
+  if (db) {
+    try {
+      const doc = await db.collection('settings').findOne({ id: 'admin_auth' })
+      stored = doc && typeof doc.password === 'string' ? doc.password.trim() : ''
+    } catch (e) { console.error('Admin key lookup error:', e?.message || e) }
+  }
+  if (stored) return passwordMatches(stored, key)
+  return !envKey && key === DEFAULT_ADMIN_KEY
 }
 
 function maskEmail(email) {
@@ -689,16 +726,20 @@ async function handleRoute(request, { params }) {
       const item = await getLiveBySlug(db, 'program', path[1], seedCampaigns)
       if (!item) return handleCORS(NextResponse.json({ error: 'Campaign not found' }, { status: 404 }))
       // recent public donations for this campaign
-      const donations = db ? await db.collection('donations').find({ campaign_slug: path[1] }).sort({ created_at: -1 }).limit(10).toArray() : []
+      // Only verified donations are shown publicly: anyone can submit the form, so pending ones are unvetted.
+      const donations = db ? await db.collection('donations').find({ campaign_slug: path[1], status: 'verified' }).sort({ created_at: -1 }).limit(10).toArray() : []
       const recent = donations.map(d => ({ name: d.is_anonymous ? 'Hamba Allah' : d.donor_name, amount: d.amount, message: d.message || '', created_at: d.created_at }))
       return handleCORS(NextResponse.json({ ...item, recent_donations: recent }))
     }
 
     // ---- Donations ----
     if (route === '/donations' && method === 'POST') {
+      if (await rateLimited(db, 'donate:' + clientIp(request), 20, 10 * MINUTE)) return tooMany()
       const body = await request.json()
       const amount = Number(body.amount)
       if (!amount || amount < 1000) return handleCORS(NextResponse.json({ error: 'Nominal donasi tidak valid (min Rp1.000)' }, { status: 400 }))
+      const kurbanQty = body.kurban_qty == null || body.kurban_qty === '' ? null : Number(body.kurban_qty)
+      if (kurbanQty !== null && !(Number.isInteger(kurbanQty) && kurbanQty >= 1 && kurbanQty <= 100)) return handleCORS(NextResponse.json({ error: 'Jumlah hewan kurban tidak valid.' }, { status: 400 }))
       for (const k of ['donor_name', 'donor_email', 'donor_whatsapp', 'campaign_slug', 'campaign_title', 'payment_method', 'donation_type', 'kurban_option']) if (body[k] != null) body[k] = txt(body[k])
       if (body.message != null) body.message = txt(body.message, 1000)
       if (!body.donor_name || !body.donor_whatsapp) return handleCORS(NextResponse.json({ error: 'Nama dan nomor WhatsApp wajib diisi' }, { status: 400 }))
@@ -729,7 +770,7 @@ async function handleRoute(request, { params }) {
         is_anonymous: !!body.is_anonymous,
         donation_type: body.donation_type || (campaign ? campaign.category : 'sedekah'),
         kurban_option: body.kurban_option || null,
-        kurban_qty: body.kurban_qty ? Number(body.kurban_qty) : null,
+        kurban_qty: kurbanQty,
         status: 'pending',
         user_id: currentUser ? currentUser.id : null,
         created_at: new Date().toISOString(),
@@ -786,6 +827,7 @@ async function handleRoute(request, { params }) {
 
     // ---- Newsletter ----
     if (route === '/newsletter' && method === 'POST') {
+      if (await rateLimited(db, 'newsletter:' + clientIp(request), 10, 10 * MINUTE)) return tooMany()
       const body = await request.json()
       const email = (body.email || '').trim().toLowerCase()
       if (!email || !email.includes('@')) return handleCORS(NextResponse.json({ error: 'Email tidak valid' }, { status: 400 }))
@@ -795,9 +837,12 @@ async function handleRoute(request, { params }) {
 
     // ---- Manual confirmation ----
     if (route === '/confirmations' && method === 'POST') {
+      if (await rateLimited(db, 'confirm:' + clientIp(request), 10, 10 * MINUTE)) return tooMany()
       const body = await request.json()
       for (const k of ['name', 'whatsapp', 'bank', 'program', 'proof_name']) if (body[k] != null) body[k] = txt(body[k])
       if (body.note != null) body.note = txt(body.note, 1000)
+      // ~3 MB file once base64-encoded; proofs are stored in the database.
+      if (body.proof_image != null && String(body.proof_image).length > 4_200_000) return handleCORS(NextResponse.json({ error: 'Bukti transfer terlalu besar (maksimal 3 MB).' }, { status: 400 }))
       if (body.proof_image != null && !/^data:(image\/(png|jpe?g|webp|gif)|application\/pdf);base64,/.test(String(body.proof_image))) body.proof_image = null
       if (!body.name || !body.whatsapp || !body.amount) return handleCORS(NextResponse.json({ error: 'Nama, WhatsApp, dan nominal wajib diisi' }, { status: 400 }))
       const conf = {
@@ -879,7 +924,8 @@ async function handleRoute(request, { params }) {
       const camp = db ? await db.collection('campaigns').findOne({ slug: 'kurban-peduli-banua' }) : null
       const opts = (camp && Array.isArray(camp.kurban_options) && camp.kurban_options[0] && camp.kurban_options[0].quota != null)
         ? camp.kurban_options : KURBAN_OPTIONS
-      const dons = db ? await db.collection('donations').find({ campaign_slug: 'kurban-peduli-banua', kurban_option: { $nin: [null, ''] } }).limit(5000).toArray() : []
+      // Verified only, so nobody can empty the quota by submitting unpaid registrations.
+      const dons = db ? await db.collection('donations').find({ campaign_slug: 'kurban-peduli-banua', status: 'verified', kurban_option: { $nin: [null, ''] } }).limit(5000).toArray() : []
       const soldMap = {}
       dons.forEach(d => { const q = Number(d.kurban_qty) || 1; soldMap[d.kurban_option] = (soldMap[d.kurban_option] || 0) + q })
       const options = opts.map(o => {
@@ -1036,7 +1082,7 @@ async function handleRoute(request, { params }) {
     // ---- Prayers (Dinding Doa) ----
     if (route === '/prayers' && method === 'GET') {
       // Only include donation messages the donor explicitly opted to display on the wall
-      const real = db ? await db.collection('donations').find({ message: { $nin: [null, ''] }, show_on_wall: true }).sort({ created_at: -1 }).limit(20).toArray() : []
+      const real = db ? await db.collection('donations').find({ message: { $nin: [null, ''] }, show_on_wall: true, status: 'verified' }).sort({ created_at: -1 }).limit(20).toArray() : []
       const realMapped = real.map(d => ({ name: d.is_anonymous ? 'Hamba Allah' : (d.donor_name || 'Hamba Allah'), message: d.message, program: d.campaign_title || '' }))
       const seeded = db ? await db.collection('prayers').find({}).sort({ created_at: -1 }).limit(50).toArray() : seedPrayers()
       const seededMapped = seeded.map(p => ({ name: p.name, message: p.message, program: p.program }))
@@ -1047,10 +1093,9 @@ async function handleRoute(request, { params }) {
     // ---- Admin ----
     if (route === '/admin/login' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const providedKey = String(body.key || '').trim()
-      if (await isValidAdminKey(db, providedKey)) {
-        return handleCORS(NextResponse.json({ ok: true, db: !!db }))
-      }
+      const result = await checkAdminKey(db, request, String(body.key || '').trim())
+      if (result === 'locked') return tooMany()
+      if (result === 'ok') return handleCORS(NextResponse.json({ ok: true, db: !!db }))
       return handleCORS(NextResponse.json({ error: 'Kunci admin salah' }, { status: 401 }))
     }
 
@@ -1091,14 +1136,16 @@ async function handleRoute(request, { params }) {
         await db.collection('settings').updateOne({ id: 'admin_reset' }, { $set: { attempts } })
         return handleCORS(NextResponse.json({ error: 'Kode verifikasi salah.' }, { status: 400 }))
       }
-      await db.collection('settings').updateOne({ id: 'admin_auth' }, { $set: { id: 'admin_auth', password: newPass, updated_at: new Date().toISOString() } }, { upsert: true })
+      await db.collection('settings').updateOne({ id: 'admin_auth' }, { $set: { id: 'admin_auth', password: hashPassword(newPass), updated_at: new Date().toISOString() } }, { upsert: true })
       await db.collection('settings').deleteOne({ id: 'admin_reset' })
       return handleCORS(NextResponse.json({ ok: true }))
     }
 
     if (String(route || '').startsWith('/admin')) {
       const provided = String(request.headers.get('x-admin-key') || '').trim()
-      if (!(await isValidAdminKey(db, provided))) return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+      const auth = await checkAdminKey(db, request, provided)
+      if (auth === 'locked') return tooMany()
+      if (auth !== 'ok') return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
 
       // CMS reads go through the same functions as the public site. Without a database they return
       // the same demo content the visitors see (db:false tells the panel it is read-only).
@@ -1166,7 +1213,7 @@ async function handleRoute(request, { params }) {
         const newPass = String(body.new_password || '')
         if (newPass.length < 6) return handleCORS(NextResponse.json({ error: 'Password baru minimal 6 karakter.' }, { status: 400 }))
         if (newPass === provided) return handleCORS(NextResponse.json({ error: 'Password baru harus berbeda dari yang sekarang.' }, { status: 400 }))
-        await db.collection('settings').updateOne({ id: 'admin_auth' }, { $set: { id: 'admin_auth', password: newPass, updated_at: new Date().toISOString() } }, { upsert: true })
+        await db.collection('settings').updateOne({ id: 'admin_auth' }, { $set: { id: 'admin_auth', password: hashPassword(newPass), updated_at: new Date().toISOString() } }, { upsert: true })
         return handleCORS(NextResponse.json({ ok: true }))
       }
 
@@ -1249,6 +1296,7 @@ async function handleRoute(request, { params }) {
         const form = await request.formData()
         const file = form.get('file')
         if (!file || typeof file === 'string') return handleCORS(NextResponse.json({ error: 'File tidak ditemukan' }, { status: 400 }))
+        if (!/^(image\/(png|jpeg|webp|gif|avif)|application\/pdf)$/.test(file.type)) return handleCORS(NextResponse.json({ error: 'Jenis file tidak didukung. Gunakan gambar (PNG, JPG, WebP, GIF) atau PDF.' }, { status: 400 }))
         const MAX = 10 * 1024 * 1024
         if (file.size > MAX) return handleCORS(NextResponse.json({ error: 'Ukuran file terlalu besar (maksimal 10MB).' }, { status: 400 }))
         const buffer = Buffer.from(await file.arrayBuffer())
@@ -1289,7 +1337,7 @@ async function handleRoute(request, { params }) {
     console.error('API Error:', route, error)
     // Most crashes on a DB-less deployment are `db.collection` on null → tell the caller clearly.
     if (/Cannot read propert(y|ies) of null/.test(String(error))) return noDbResponse()
-    return handleCORS(NextResponse.json({ error: 'Internal server error', detail: String(error?.message || error) }, { status: 500 }))
+    return handleCORS(NextResponse.json({ error: 'Terjadi kesalahan di server. Silakan coba lagi.' }, { status: 500 }))
   }
 }
 

@@ -69,10 +69,11 @@ const routeFile = path.resolve('app/api/[[...path]]/route.js')
 const route = await import(pathToFileURL(routeFile).href)
 const cms = await import(pathToFileURL(path.resolve('lib/cms.js')).href)
 
-async function call(method, p, { body, admin = false } = {}) {
+async function call(method, p, { body, admin = false, ip } = {}) {
   const url = 'http://localhost/api/' + p
   const headers = { 'content-type': 'application/json' }
   if (admin) headers['x-admin-key'] = 'test-admin-key'
+  if (ip) headers['x-forwarded-for'] = ip
   const req = new NextRequest(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
   const res = await route[method](req, { params: Promise.resolve({ path: p.split('?')[0].split('/') }) })
   return { status: res.status, body: await res.json() }
@@ -543,4 +544,56 @@ test('Security: the admin reset code dies after 5 wrong guesses', async () => {
   const late = await call('POST', 'admin/reset-password', { body: { otp: '123456', new_password: 'hacked-pass' } })
   assert.equal(late.status, 400, 'even the right code no longer works')
   assert.equal(await settings.findOne({ id: 'admin_auth', password: 'hacked-pass' }), null)
+})
+
+test('Security: unverified donations never reach public pages (donor list, prayer wall, kurban quota)', async () => {
+  useDb()
+  const slug = 'kurban-peduli-banua'
+  const sold = async () => (await call('GET', 'kurban/quota')).body.options.find((o) => o.key === 'kambing').sold
+  const before = await sold()
+  const donor = { amount: 2750000, donor_name: 'Pekurban Uji', donor_whatsapp: '081234567890', campaign_slug: slug, kurban_option: 'kambing', message: 'Doa uji tembok', show_on_wall: true }
+
+  assert.equal((await call('POST', 'donations', { body: { ...donor, kurban_qty: -5 } })).status, 400, 'negative quantity refused')
+  assert.equal((await call('POST', 'donations', { body: { ...donor, kurban_qty: 5000 } })).status, 400, 'absurd quantity refused')
+
+  const d = (await call('POST', 'donations', { body: { ...donor, kurban_qty: 2 } })).body
+  const onWall = async () => (await call('GET', 'prayers')).body.some((p) => p.message === 'Doa uji tembok')
+  const inList = async () => (await call('GET', `campaigns/${slug}`)).body.recent_donations.some((x) => x.name === 'Pekurban Uji')
+  assert.equal(await sold(), before, 'pending registration does not consume quota')
+  assert.equal(await onWall(), false)
+  assert.equal(await inList(), false)
+
+  await call('POST', 'admin/verify', { admin: true, body: { donation_id: d.id, status: 'verified' } })
+  assert.equal(await sold(), before + 2)
+  assert.equal(await onWall(), true)
+  assert.equal(await inList(), true)
+})
+
+test('Security: wrong admin keys lock the IP out; public forms are rate limited per IP', async () => {
+  useDb()
+  const ip = '203.0.113.9'
+  for (let i = 0; i < 10; i++) assert.equal((await call('POST', 'admin/login', { ip, body: { key: 'tebakan-' + i } })).status, 401)
+  assert.equal((await call('POST', 'admin/login', { ip, body: { key: 'test-admin-key' } })).status, 429, 'locked even with the right key')
+  assert.equal((await call('GET', 'admin/donations', { ip, admin: true })).status, 429)
+  assert.equal((await call('POST', 'admin/login', { ip: '203.0.113.10', body: { key: 'test-admin-key' } })).status, 200, 'other visitors are unaffected')
+
+  for (let i = 0; i < 10; i++) assert.equal((await call('POST', 'newsletter', { ip, body: { email: `a${i}@contoh.com` } })).status, 200)
+  assert.equal((await call('POST', 'newsletter', { ip, body: { email: 'lagi@contoh.com' } })).status, 429)
+})
+
+test('Security: the panel password is stored hashed and still logs in', async () => {
+  useDb()
+  assert.equal((await call('POST', 'admin/change-password', { admin: true, body: { new_password: 'sandi-panel-baru' } })).status, 200)
+  const doc = await new FakeDb().collection('settings').findOne({ id: 'admin_auth' })
+  assert.ok(doc.password.startsWith('scrypt:') && !doc.password.includes('sandi-panel-baru'))
+  assert.equal((await call('POST', 'admin/login', { body: { key: 'sandi-panel-baru' } })).status, 200)
+  assert.equal((await call('POST', 'admin/login', { body: { key: 'sandi-panel-salah' } })).status, 401)
+})
+
+test('Security: no wildcard CORS, and server errors do not leak internals', async () => {
+  useDb()
+  const req = new NextRequest('http://localhost/api/donations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{rusak' })
+  const res = await route.POST(req, { params: Promise.resolve({ path: ['donations'] }) })
+  assert.equal(res.headers.get('access-control-allow-origin'), null)
+  assert.equal((await res.json()).detail, undefined)
 })

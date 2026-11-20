@@ -1,33 +1,27 @@
-'use client';
-
-import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useApi } from '@/components/site/use-api';
+import { apiGet } from '@/lib/server-api';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import CampaignDetailView from '@/components/site/campaign-detail';
 
-export default function CampaignDetailPage() {
-  const params = useParams();
-  const slug = params?.slug;
-  const { data: c, loading } = useApi(`/api/campaigns/${slug}`);
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
+  const c = await apiGet(`/campaigns/${slug}`);
+  if (!c) return { title: 'Program Tidak Ditemukan', robots: { index: false } };
+  return {
+    title: c.title,
+    description: c.short_desc,
+    openGraph: { title: c.title, description: c.short_desc, images: c.image ? [c.image] : undefined },
+    twitter: { card: 'summary_large_image' },
+  };
+}
 
-  if (loading) {
-    return (
-      <div className="container py-16">
-        <div className="grid lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="aspect-[16/9] rounded-2xl bg-muted animate-pulse" />
-            <div className="h-8 bg-muted animate-pulse rounded-lg w-3/4" />
-            <div className="h-40 bg-muted animate-pulse rounded-lg" />
-          </div>
-          <div className="h-80 bg-muted animate-pulse rounded-2xl" />
-        </div>
-      </div>
-    );
-  }
+// Fetched on the server so the program's story is in the HTML for search engines.
+export default async function CampaignDetailPage({ params }) {
+  const { slug } = await params;
+  const c = await apiGet(`/campaigns/${slug}`);
 
-  if (!c || c.error) {
+  if (!c) {
     return (
       <div className="container py-24 text-center">
         <h1 className="text-2xl font-bold text-brand-ink">Program tidak ditemukan</h1>
