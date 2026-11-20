@@ -7,12 +7,12 @@ import { Toaster } from '@/components/ui/sonner'
 import JsonLd from '@/components/site/json-ld'
 import { ORG, LOCATIONS, SOCIALS, WHATSAPP_ADMIN } from '@/lib/site-data'
 
-const DESCRIPTION = 'Panti Asuhan Banua Berkah di Banjarmasin, dikelola Yayasan Banua Berkah Mandiri (YABABERMA). Mengasuh anak yatim dan dhuafa, menerima zakat, wakaf, sedekah, dan kurban secara amanah.'
+const DESCRIPTION = 'Yayasan Banua Berkah Mandiri (YABABERMA), lembaga filantropi Islam di Banjarmasin yang menaungi Panti Asuhan Banua Berkah. Salurkan zakat, wakaf, sedekah, dan kurban secara amanah dan transparan.'
 
 export const metadata = {
   metadataBase: new URL(ORG.url),
   title: {
-    default: 'Panti Asuhan Banua Berkah Banjarmasin | Yayasan Banua Berkah Mandiri',
+    default: 'Yayasan Banua Berkah Mandiri (YABABERMA) | Zakat, Wakaf, Sedekah & Kurban di Banjarmasin',
     template: '%s | YABABERMA',
   },
   description: DESCRIPTION,
@@ -34,7 +34,7 @@ const ORG_JSONLD = {
   '@type': 'NGO',
   '@id': ORG.url + '/#organisasi',
   name: ORG.name,
-  alternateName: [ORG.short, 'Panti Asuhan Banua Berkah'],
+  alternateName: ORG.short,
   url: ORG.url,
   logo: ORG.url + ORG.logo,
   description: DESCRIPTION,
@@ -44,6 +44,7 @@ const ORG_JSONLD = {
   address: place(LOCATIONS[0]).address,
   location: LOCATIONS.map(place),
   areaServed: 'Banjarmasin, Kalimantan Selatan',
+  subOrganization: { '@type': 'NGO', name: 'Panti Asuhan Banua Berkah', url: ORG.pantiUrl },
   sameAs: Object.values(SOCIALS),
 }
 

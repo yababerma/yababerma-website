@@ -23,6 +23,10 @@ const nextConfig = {
     maxInactiveAge: 10000,
     pagesBufferLength: 2,
   },
+  async redirects() {
+    // The panti has its own site; one address per keyword so the two sites do not compete.
+    return [{ source: '/panti-asuhan-banjarmasin', destination: 'https://pantiasuhanbanuaberkah.yababerma.org', permanent: true }];
+  },
   async headers() {
     return [
       {

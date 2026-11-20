@@ -1,7 +1,7 @@
 import { ORG } from '@/lib/site-data'
 import { apiGet } from '@/lib/server-api'
 
-const STATIC = ['', '/panti-asuhan-banjarmasin', '/program', '/donasi', '/kurban', '/news', '/kegiatan', '/komunitas', '/pusat-layanan', '/tentang-kami', '/laporan', '/faq']
+const STATIC = ['', '/program', '/donasi', '/kurban', '/news', '/kegiatan', '/komunitas', '/pusat-layanan', '/tentang-kami', '/laporan', '/faq']
 
 export default async function sitemap() {
   const [news, campaigns] = await Promise.all([apiGet('/news'), apiGet('/campaigns')])
