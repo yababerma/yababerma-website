@@ -297,12 +297,14 @@ test('the public default admin key only works while no real key is configured', 
 // ================= Testimoni, Komunitas, Partner, Penulis =================
 test('no DB: new content kinds show the same data in admin and public, read-only', async () => {
   noDb()
-  for (const [pub, adm] of [['testimonials', 'testimonials'], ['partners', 'partners'], ['communities', 'communities']]) {
+  for (const [pub, adm] of [['partners', 'partners'], ['communities', 'communities']]) {
     const p = (await call('GET', pub)).body
     const a = (await call('GET', `admin/${adm}`, { admin: true })).body
     assert.equal(a.db, false)
     assert.deepEqual(ids(a.items), ids(p), pub)
   }
+  assert.equal((await call('GET', 'testimonials')).body.length, 0, 'testimoni contoh tidak publik')
+  assert.equal((await call('GET', 'admin/testimonials', { admin: true })).body.items.length, 4, 'contoh tetap ada di admin')
   assert.equal((await call('GET', 'partners')).body.length, 6, 'the six former hard-coded partners')
   assert.ok((await call('GET', 'partners')).body.every((x) => x.type === 'kebaikan' && x.type_label === 'Partner Kebaikan'))
   const author = (await call('GET', 'authors/matsani-mubaroq')).body
@@ -424,6 +426,16 @@ test('Entries are seeded once: deleting all testimonials keeps them deleted', as
   for (const t of (await call('GET', 'admin/testimonials', { admin: true })).body.items) await call('DELETE', `admin/testimonials/${t.id}`, { admin: true })
   await cms.ensureEntrySeeds(new FakeDb(), { testimonial: () => [{ id: 'again', name: 'x', quote: 'y' }] })
   assert.equal((await call('GET', 'testimonials')).body.length, 0)
+})
+
+test('Konten contoh tidak tampil publik (testimoni, doa, laporan)', async () => {
+  useDb()
+  assert.equal((await call('GET', 'testimonials')).body.length, 0, 'testimoni contoh tidak publik')
+  assert.equal((await call('GET', 'prayers')).body.length, 0, 'doa contoh tidak publik')
+  const report = (await call('GET', 'reports')).body
+  assert.ok(!report.years.includes('2024') && !report.years.includes('2025'), 'laporan tahunan contoh tidak publik')
+  const mine = (await call('POST', 'admin/testimonials', { admin: true, body: { name: 'Donatur Riil', quote: 'Terima kasih' } })).body
+  assert.deepEqual((await call('GET', 'testimonials')).body.map((t) => t.id), [mine.id], 'data riil tetap tampil')
 })
 
 test('Identitas & Kontak: defaults without DB, admin edit shows publicly, bad input refused', async () => {

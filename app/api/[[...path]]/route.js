@@ -466,6 +466,14 @@ function seedPrayers() {
   ]
 }
 
+// Konten contoh (testimoni, doa, laporan tahunan) disembunyikan dari publik sampai data riil siap.
+// Data contoh tetap ada di database dan tetap tampil di panel admin. Ubah ke true untuk menampilkannya lagi.
+const SHOW_SAMPLE_CONTENT = false
+const isSampleTestimonial = (t) => String(t.id || '').startsWith('seed-')
+const isSamplePrayer = (p) => seedPrayers().some((s) => s.name === p.name && s.message === p.message)
+const isSampleReport = (r) => seedAnnualReports().some((s) => s.year === r.year && s.total_collected === r.total_collected)
+const hideSample = (items, isSample) => (SHOW_SAMPLE_CONTENT ? items : items.filter((x) => !isSample(x)))
+
 async function ensureSeed(db) {
   await ensureCmsSeed(db, { programs: seedCampaigns, articles: seedNews, slides: seedSlides })
   await ensureEntrySeeds(db, { testimonial: seedTestimonials, partner: seedPartners, author: seedAuthors })
@@ -887,7 +895,7 @@ async function handleRoute(request, { params }) {
 
     // ---- Testimonials & Gallery ----
     if (route === '/testimonials' && method === 'GET') {
-      return handleCORS(NextResponse.json(await listLive(db, 'testimonial', seedTestimonials)))
+      return handleCORS(NextResponse.json(hideSample(await listLive(db, 'testimonial', seedTestimonials), isSampleTestimonial)))
     }
     if (route === '/communities' && method === 'GET') {
       return handleCORS(NextResponse.json(await withProgramTitles(db, await listLive(db, 'community', seedCommunities), seedCampaigns)))
@@ -956,7 +964,7 @@ async function handleRoute(request, { params }) {
         by_program: campaigns.map(c => ({ title: c.title, slug: c.slug, collected: c.collected_amount || 0, target: c.target_amount || 0 })),
       }
 
-      const history = db ? cleanArr(await db.collection('annual_reports').find({}).sort({ year: -1 }).limit(20).toArray()) : seedAnnualReports()
+      const history = hideSample(db ? cleanArr(await db.collection('annual_reports').find({}).sort({ year: -1 }).limit(20).toArray()) : seedAnnualReports(), isSampleReport)
       const allDocs = [liveDoc, ...history.filter(h => h.year !== currentYear)]
       const years = ['all', ...allDocs.map(d => String(d.year)).sort((a, b) => Number(b) - Number(a))]
 
@@ -1085,7 +1093,7 @@ async function handleRoute(request, { params }) {
       const real = db ? await db.collection('donations').find({ message: { $nin: [null, ''] }, show_on_wall: true, status: 'verified' }).sort({ created_at: -1 }).limit(20).toArray() : []
       const realMapped = real.map(d => ({ name: d.is_anonymous ? 'Hamba Allah' : (d.donor_name || 'Hamba Allah'), message: d.message, program: d.campaign_title || '' }))
       const seeded = db ? await db.collection('prayers').find({}).sort({ created_at: -1 }).limit(50).toArray() : seedPrayers()
-      const seededMapped = seeded.map(p => ({ name: p.name, message: p.message, program: p.program }))
+      const seededMapped = hideSample(seeded, isSamplePrayer).map(p => ({ name: p.name, message: p.message, program: p.program }))
       const all = [...realMapped, ...seededMapped].slice(0, 30)
       return handleCORS(NextResponse.json(all))
     }
